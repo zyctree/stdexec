@@ -907,9 +907,9 @@ namespace std::execution {
     template <class _Promise>
     struct with_awaitable_senders : __impl::__with_awaitable_senders_base {
       template <class _Value>
-      decltype(auto) await_transform(_Value&& __val) {
+      decltype(auto) await_transform(_Value&& __value) {
         static_assert(derived_from<_Promise, with_awaitable_senders>);
-        return as_awaitable((_Value&&) __val, static_cast<_Promise&>(*this));
+        return as_awaitable((_Value&&) __value, static_cast<_Promise&>(*this));
       }
     };
   }
@@ -3024,6 +3024,123 @@ _PRAGMA_POP()
       }
     } transfer_when_all_with_variant {};
   } // namespace __when_all
+
+  // Sender adaptor that associates a piece of data with a receiver query
+  inline namespace __write_ {
+    namespace __impl {
+      template <typename _CPO, typename _Value, typename _Receiver>
+        struct __receiver_wrapper_ {
+          struct __t {
+            template <typename _Receiver2>
+              explicit __t(_Receiver2 &&__rcvr, const _Value& val)
+                : __rcvr_((_Receiver2 &&) __rcvr)
+                , __value_(&val) {}
+
+           private:
+            friend const _Value& tag_invoke(_CPO, const __t &r) noexcept {
+              return *r.__value_;
+            }
+
+            template<__none_of<_CPO> _OtherCPO, __decays_to<__t> _Self, typename... _Args>
+              requires invocable<_OtherCPO, __member_t<_Self, _Receiver>, _Args...>
+            friend auto tag_invoke(_OtherCPO cpo, _Self&& self, _Args&&... args)
+                noexcept(is_nothrow_invocable_v<_OtherCPO, __member_t<_Self, _Receiver>, _Args...>)
+                -> invoke_result_t<_OtherCPO, __member_t<_Self, _Receiver>, _Args...> {
+              return ((_OtherCPO&&) cpo)(((_Self&&) self).__rcvr_, (_Args&&) args...);
+            }
+
+            [[no_unique_address]] _Receiver __rcvr_;
+            const _Value* __value_;
+          };
+        };
+      template <typename _CPO, typename _Value, typename _Receiver>
+        using __receiver_wrapper = typename __receiver_wrapper_<_CPO, _Value, _Receiver>::__t;
+
+      template <typename _CPO, typename _Value, typename _Sender, typename _Receiver>
+        struct __operation_ {
+          struct __t {
+            template <typename _Receiver2, typename _Value2>
+            explicit __t(_Sender &&__sndr, _Receiver2 &&__rcvr, _Value2 &&__value)
+              : __value_((_Value2 &&) __value)
+              , __inner_op_(
+                    connect((_Sender &&) __sndr,
+                            __receiver_wrapper<_CPO, _Value, _Receiver>{
+                                (_Receiver2 &&) __rcvr, __value_})) {}
+
+           private:
+            friend void tag_invoke(start_t, __t& self) noexcept {
+              start(self.__inner_op_);
+            }
+
+            [[no_unique_address]] _Value __value_;
+            [[no_unique_address]]
+            connect_result_t<_Sender, __receiver_wrapper<_CPO, _Value, _Receiver>> __inner_op_;
+          };
+        };
+      template <typename _CPO, typename _Value, typename _Sender, typename _Receiver>
+        using __operation = typename __operation_<_CPO, _Value, _Sender, _Receiver>::__t;
+
+      template <typename _CPOId, typename _ValueId, typename _SenderId>
+        class __sender_ {
+          using _CPO = __t<_CPOId>;
+          using _Value = __t<_ValueId>;
+          using _Sender = __t<_SenderId>;
+
+          _Sender __sndr_;
+          _Value __value_;
+
+          template<__decays_to<__sender_> _Self, typename _Receiver>
+            requires constructible_from<_Value, __member_t<_Self, _Value>> &&
+              sender_to<
+                __member_t<_Self, _Sender>,
+                __receiver_wrapper<_CPO, _Value, remove_cvref_t<_Receiver>>>
+          friend auto tag_invoke(connect_t, _Self&& self, _Receiver &&__rcvr)
+              // _TODO
+              // noexcept(is_nothrow_constructible_v<_Value, __member_t<_Self, _Value>> &&
+              //          is_nothrow_connectable_v<
+              //             __member_t<_Self, _Sender>,
+              //             __receiver_wrapper<_CPO, _Value, remove_cvref_t<_Receiver>>>)
+              -> __operation<_CPO, _Value, __member_t<_Self, _Sender>, remove_cvref_t<_Receiver>> {
+            return __operation<_CPO, _Value, __member_t<_Self, _Sender>, remove_cvref_t<_Receiver>>{
+                ((_Self&&) self).__sndr_, (_Receiver&&) __rcvr, ((_Self&&) self).__value_};
+          }
+
+         public:
+          template <template <typename...> class _Tuple,
+                    template <typename...> class _Variant>
+            using value_types = value_types_of_t<_Sender, _Variant, _Tuple>;
+
+          template <template <typename...> class _Variant>
+            using error_types = error_types_of_t<_Sender, _Variant>;
+
+          static constexpr bool sends_done = sender_traits<_Sender>::sends_done;
+
+          template <typename _Sender2, typename _Value2>
+            explicit __sender_(_Sender2 &&__sndr, _Value2 &&__value)
+              : __sndr_((_Sender2 &&) __sndr), __value_((_Value &&) __value) {}
+        };
+
+      template <typename _CPO, typename _Value, typename _Sender>
+        using __sender =
+          __sender_<__x<_CPO>, __x<_Value>, __x<_Sender>>;
+    } // namespace __impl
+
+    inline const struct __write_t {
+      template <sender _Sender, typename _CPO, typename _Value>
+        auto operator()(_Sender&& __sndr, _CPO, _Value&& __value) const
+          -> __impl::__sender<_CPO, decay_t<_Value>, remove_cvref_t<_Sender>> {
+          static_assert(is_empty_v<_CPO>, "__write() does not support stateful _CPOs");
+          return __impl::__sender<_CPO, decay_t<_Value>, remove_cvref_t<_Sender>>{
+              (_Sender&&) __sndr, (_Value&&) __value};
+        }
+      template <typename _CPO, typename _Value>
+        constexpr __binder_back<__write_t, _CPO, decay_t<_Value>>
+        operator()(_CPO, _Value&& __value) const
+            noexcept(is_nothrow_constructible_v<decay_t<_Value>, _Value>) {
+          return __binder_back<__write_t, _CPO, decay_t<_Value>>{{}, {}, {{}, (_Value&&) __value}};
+        }
+    } __write {};
+  } // namespace __write_
 } // namespace std::execution
 
 namespace std::this_thread {
