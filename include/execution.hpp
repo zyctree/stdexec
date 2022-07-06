@@ -802,81 +802,92 @@ namespace std::execution {
   /////////////////////////////////////////////////////////////////////////////
   // [execution.general.queries], general queries
   namespace __general_queries {
-    namespace __impl {
-      // TODO: implement allocator concept
-      template <class _T0>
-        concept __allocator = true;
+    // TODO: implement allocator concept
+    template <class _T0>
+      concept __allocator = true;
 
-      struct get_scheduler_t {
-        template <__none_of<no_env> _Env>
-          requires nothrow_tag_invocable<get_scheduler_t, const _Env&> &&
-            scheduler<tag_invoke_result_t<get_scheduler_t, const _Env&>>
-        auto operator()(const _Env& __env) const
-          noexcept(nothrow_tag_invocable<get_scheduler_t, const _Env&>)
-          -> tag_invoke_result_t<get_scheduler_t, const _Env&> {
-          return tag_invoke(get_scheduler_t{}, __env);
-        }
-        auto operator()() const noexcept;
-      };
+    struct get_scheduler_t {
+      template <__none_of<no_env> _Env>
+        requires nothrow_tag_invocable<get_scheduler_t, const _Env&> &&
+          scheduler<tag_invoke_result_t<get_scheduler_t, const _Env&>>
+      auto operator()(const _Env& __env) const
+        noexcept(nothrow_tag_invocable<get_scheduler_t, const _Env&>)
+        -> tag_invoke_result_t<get_scheduler_t, const _Env&> {
+        return tag_invoke(get_scheduler_t{}, __env);
+      }
+      auto operator()() const noexcept;
+    };
 
-      struct get_delegatee_scheduler_t {
-        template <class _T>
-          requires nothrow_tag_invocable<get_delegatee_scheduler_t, __cref_t<_T>> &&
-            scheduler<tag_invoke_result_t<get_delegatee_scheduler_t, __cref_t<_T>>>
-        auto operator()(_T&& __t) const
-          noexcept(nothrow_tag_invocable<get_delegatee_scheduler_t, __cref_t<_T>>)
-          -> tag_invoke_result_t<get_delegatee_scheduler_t, __cref_t<_T>> {
-          return tag_invoke(get_delegatee_scheduler_t{}, std::as_const(__t));
-        }
-        auto operator()() const noexcept;
-      };
+    struct get_delegatee_scheduler_t {
+      template <class _T>
+        requires nothrow_tag_invocable<get_delegatee_scheduler_t, __cref_t<_T>> &&
+          scheduler<tag_invoke_result_t<get_delegatee_scheduler_t, __cref_t<_T>>>
+      auto operator()(_T&& __t) const
+        noexcept(nothrow_tag_invocable<get_delegatee_scheduler_t, __cref_t<_T>>)
+        -> tag_invoke_result_t<get_delegatee_scheduler_t, __cref_t<_T>> {
+        return tag_invoke(get_delegatee_scheduler_t{}, std::as_const(__t));
+      }
+      auto operator()() const noexcept;
+    };
 
-      struct get_allocator_t {
-        template <__none_of<no_env> _Env>
-          requires nothrow_tag_invocable<get_allocator_t, const _Env&> &&
-            __allocator<tag_invoke_result_t<get_allocator_t, const _Env&>>
-        auto operator()(const _Env& __env) const
-          noexcept(nothrow_tag_invocable<get_allocator_t, const _Env&>)
-          -> tag_invoke_result_t<get_allocator_t, const _Env&> {
-          return tag_invoke(get_allocator_t{}, __env);
-        }
-        auto operator()() const noexcept;
-      };
+    struct get_allocator_t {
+      template <__none_of<no_env> _Env>
+        requires nothrow_tag_invocable<get_allocator_t, const _Env&> &&
+          __allocator<tag_invoke_result_t<get_allocator_t, const _Env&>>
+      auto operator()(const _Env& __env) const
+        noexcept(nothrow_tag_invocable<get_allocator_t, const _Env&>)
+        -> tag_invoke_result_t<get_allocator_t, const _Env&> {
+        return tag_invoke(get_allocator_t{}, __env);
+      }
+      auto operator()() const noexcept;
+    };
 
-      struct get_stop_token_t {
-        template <__none_of<no_env> _Env>
-        never_stop_token operator()(const _Env&) const noexcept {
-          return {};
-        }
-        template <__none_of<no_env> _Env>
-          requires tag_invocable<get_stop_token_t, const _Env&> &&
-            stoppable_token<tag_invoke_result_t<get_stop_token_t, const _Env&>>
-        auto operator()(const _Env& __env) const
-          noexcept(nothrow_tag_invocable<get_stop_token_t, const _Env&>)
-          -> tag_invoke_result_t<get_stop_token_t, const _Env&> {
-          return tag_invoke(get_stop_token_t{}, __env);
-        }
-        auto operator()() const noexcept;
-      };
-    } // namespace __impl
+    struct get_stop_token_t {
+      template <__none_of<no_env> _Env>
+      never_stop_token operator()(const _Env&) const noexcept {
+        return {};
+      }
+      template <__none_of<no_env> _Env>
+        requires tag_invocable<get_stop_token_t, const _Env&> &&
+          stoppable_token<tag_invoke_result_t<get_stop_token_t, const _Env&>>
+      auto operator()(const _Env& __env) const
+        noexcept(nothrow_tag_invocable<get_stop_token_t, const _Env&>)
+        -> tag_invoke_result_t<get_stop_token_t, const _Env&> {
+        return tag_invoke(get_stop_token_t{}, __env);
+      }
+      auto operator()() const noexcept;
+    };
 
-    using __impl::get_allocator_t;
-    using __impl::get_scheduler_t;
-    using __impl::get_delegatee_scheduler_t;
-    using __impl::get_stop_token_t;
+    struct get_domain_t {
+      template <__none_of<no_env> _Ty>
+        requires tag_invocable<get_domain_t, const _Ty&>
+      auto operator()(const _Ty& __ty) const noexcept
+        -> tag_invoke_result_t<get_domain_t, const _Ty&> {
+        static_assert(
+          nothrow_tag_invocable<get_domain_t, const _Ty&>,
+          "Customizations of get_domain must be noexcept.");
+        return tag_invoke(get_domain_t{}, __ty);
+      }
+    };
   } // namespace __general_queries
   using __general_queries::get_allocator_t;
   using __general_queries::get_scheduler_t;
   using __general_queries::get_delegatee_scheduler_t;
   using __general_queries::get_stop_token_t;
+  using __general_queries::get_domain_t;
   inline constexpr get_scheduler_t get_scheduler{};
   inline constexpr get_delegatee_scheduler_t get_delegatee_scheduler{};
   inline constexpr get_allocator_t get_allocator{};
   inline constexpr get_stop_token_t get_stop_token{};
+  inline constexpr get_domain_t get_domain{};
 
   template <class _T>
     using stop_token_of_t =
       remove_cvref_t<decltype(get_stop_token(__declval<_T>()))>;
+
+  template <class _T>
+    using domain_of_t =
+      __call_result_t<get_domain_t, _T>;
 
   template <class _SchedulerProvider>
     concept __scheduler_provider =
@@ -1128,6 +1139,13 @@ namespace std::execution {
     struct connect_t;
 
     template <class _Sender, class _Receiver>
+      concept __connectable_with_domain =
+        sender<_Sender, env_of_t<_Receiver>> &&
+        __receiver_from<_Receiver, _Sender> &&
+        __callable<get_domain_t, env_of_t<_Receiver>> &&
+        tag_invocable<connect_t, domain_of_t<env_of_t<_Receiver>>, _Sender, _Receiver>;
+
+    template <class _Sender, class _Receiver>
       concept __connectable_with_tag_invoke =
         sender<_Sender, env_of_t<_Receiver>> &&
         __receiver_from<_Receiver, _Sender> &&
@@ -1136,7 +1154,9 @@ namespace std::execution {
     struct connect_t {
       template <class _Sender, class _Receiver>
       static constexpr bool __nothrow_connect() noexcept {
-        if constexpr (__connectable_with_tag_invoke<_Sender, _Receiver>) {
+        if constexpr (__connectable_with_domain<_Sender, _Receiver>){
+          return nothrow_tag_invocable<connect_t, domain_of_t<env_of_t<_Receiver>>, _Sender, _Receiver>;
+        } else if constexpr (__connectable_with_tag_invoke<_Sender, _Receiver>) {
           return nothrow_tag_invocable<connect_t, _Sender, _Receiver>;
         } else {
           return false;
@@ -1144,13 +1164,19 @@ namespace std::execution {
       }
 
       template <class _Sender, class _Receiver>
-        requires
+        requires __connectable_with_domain<_Sender, _Receiver> ||
           __connectable_with_tag_invoke<_Sender, _Receiver> ||
           __callable<__connect_awaitable_t, _Sender, _Receiver> ||
           tag_invocable<__is_debug_env_t, env_of_t<_Receiver>>
       auto operator()(_Sender&& __sndr, _Receiver&& __rcvr) const
           noexcept(__nothrow_connect<_Sender, _Receiver>()) {
-        if constexpr (__connectable_with_tag_invoke<_Sender, _Receiver>) {
+        if constexpr (__connectable_with_domain<_Sender, _Receiver>) {
+          static_assert(
+            operation_state<tag_invoke_result_t<connect_t, domain_of_t<env_of_t<_Receiver>>, _Sender, _Receiver>>,
+            "execution::connect(sender, receiver) must return a type that "
+            "satisfies the operation_state concept");
+          return tag_invoke(connect_t{}, get_domain(get_env(__rcvr)), (_Sender&&) __sndr, (_Receiver&&) __rcvr);
+        } else if constexpr (__connectable_with_tag_invoke<_Sender, _Receiver>) {
           static_assert(
             operation_state<tag_invoke_result_t<connect_t, _Sender, _Receiver>>,
             "execution::connect(sender, receiver) must return a type that "
@@ -4571,7 +4597,7 @@ namespace std::execution {
   // NOT TO SPEC
   inline constexpr __write::__write_t write {};
 
-  namespace __general_queries::__impl {
+  namespace __general_queries {
     inline auto get_scheduler_t::operator()() const noexcept {
       return read(get_scheduler);
     }
