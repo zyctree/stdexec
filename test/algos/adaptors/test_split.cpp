@@ -169,9 +169,11 @@ TEST_CASE("split forwards external stop signal (3)", "[adaptors][split]") {
   int counter{};
   auto split =
     ex::split(
-      ex::on(
-        sched,
-        ex::just() | ex::then([&]{ called = true; return 7; })));
+      ex::complete_on(
+        ex::on(
+          sched,
+          ex::just() | ex::then([&]{ called = true; return 7; })),
+        inline_scheduler{}));
   auto sndr =
     ex::write(
       ex::upon_stopped(
@@ -209,7 +211,8 @@ TEST_CASE("split forwards external stop signal (4)", "[adaptors][split]") {
         ex::write(
           split,
           ex::with(ex::get_stop_token, ssource.get_token())),
-        [&]{ ++counter; return 42; }));
+        [&]{ ++counter; return 42; }))
+  | ex::complete_on(inline_scheduler{});
   auto sndr2 =
     ex::write(
       ex::on(
@@ -217,7 +220,8 @@ TEST_CASE("split forwards external stop signal (4)", "[adaptors][split]") {
         ex::upon_stopped(
           split,
           [&]{ ++counter; return 42; })),
-      ex::with(ex::get_stop_token, ssource.get_token()));
+      ex::with(ex::get_stop_token, ssource.get_token()))
+  | ex::complete_on(inline_scheduler{});
   auto op1 = ex::connect(sndr1, expect_value_receiver{7});
   auto op2 = ex::connect(sndr2, expect_stopped_receiver{});
   REQUIRE( counter == 0 );
