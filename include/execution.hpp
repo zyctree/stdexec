@@ -3929,6 +3929,137 @@ namespace std::execution {
   using __on::on_t;
   inline constexpr on_t on{};
 
+  // namespace __complete_on
+  namespace __complete_on {
+    struct __complete_on_t;
+
+    template <class _SchedulerId, class _ReceiverId>
+      struct __operation_base {
+        using _Scheduler = __t<_SchedulerId>;
+        using _Receiver = __t<_ReceiverId>;
+        _Scheduler __sched_;
+        _Receiver __rcvr_;
+      };
+
+    template <class _SchedulerId, class _ReceiverId>
+      struct __receiver
+        : receiver_adaptor<__receiver<_SchedulerId, _ReceiverId>> {
+        using _Scheduler = __t<_SchedulerId>;
+        using _Receiver = __t<_ReceiverId>;
+
+        _Receiver&& base() && noexcept {
+          return (_Receiver&&) __op_->__rcvr_;
+        }
+        const _Receiver& base() const & noexcept {
+          return __op_->__rcvr_;
+        }
+
+        auto get_env() const
+          -> make_env_t<env_of_t<_Receiver>, with_t<get_scheduler_t, _Scheduler>> {
+          return make_env(
+            execution::get_env(base()),
+            with(get_scheduler, __op_->__sched_));
+        }
+
+        __operation_base<_SchedulerId, _ReceiverId>* __op_;
+      };
+
+    template <class _SenderId, class _SchedulerId, class _ReceiverId>
+      struct __operation : __operation_base<_SchedulerId, _ReceiverId> {
+        using _Sender = __t<_SenderId>;
+        using __base_t = __operation_base<_SchedulerId, _ReceiverId>;
+        using __receiver_t = __receiver<_SchedulerId, _ReceiverId>;
+        connect_result_t<_Sender, __receiver_t> __state_;
+
+        __operation(_Sender&& __sndr, auto&& __sched, auto&& __rcvr)
+          : __base_t{(decltype(__sched)) __sched, (decltype(__rcvr)) __rcvr}
+          , __state_{connect((_Sender&&) __sndr, __receiver_t{{}, this})}
+        {}
+
+        friend void tag_invoke(start_t, __operation& __self) noexcept {
+          start(__self.__state_);
+        }
+      };
+
+    template <class _SchedulerProvider>
+        requires __callable<get_scheduler_t, _SchedulerProvider>
+      using __scheduler_of_t =
+        __call_result_t<get_scheduler_t, _SchedulerProvider>;
+
+    template <class _Receiver>
+      concept __receiver_with_domain =
+        __callable<get_scheduler_t, env_of_t<_Receiver>> &&
+        __callable<get_domain_t, __scheduler_of_t<env_of_t<_Receiver>>>;
+
+    template <class _Scheduler, class _Receiver>
+      concept __in_same_domain =
+        (!__receiver_with_domain<_Receiver>) ||
+        (__callable<get_domain_t, _Scheduler> &&
+         same_as<
+          domain_of_t<__scheduler_of_t<env_of_t<_Receiver>>>,
+          domain_of_t<_Scheduler>>);
+
+    template <class _SenderId, class _SchedulerId>
+      struct __sender {
+        using _Sender = __t<_SenderId>;
+        using _Scheduler = __t<_SchedulerId>;
+        using descriptor_t = sender_descriptor_t<__complete_on_t(_Sender)>;
+        template <class _ReceiverId>
+          using __receiver_t =
+            __receiver<_SchedulerId, _ReceiverId>;
+        template <class _Self, class _ReceiverId>
+          using __operation_t =
+            __operation<__x<__member_t<_Self, _Sender>>, _SchedulerId, _ReceiverId>;
+
+        _Sender __sndr_;
+        _Scheduler __sched_;
+
+        template <__decays_to<__sender> _Self, receiver _Receiver>
+          requires
+            sender_to<__member_t<_Self, _Sender>, __receiver_t<__x<decay_t<_Receiver>>>>
+        friend auto tag_invoke(connect_t, _Self&& __self, _Receiver&& __rcvr)
+          -> __operation_t<_Self, __x<decay_t<_Receiver>>> {
+          static_assert(__in_same_domain<_Scheduler, _Receiver>,
+            "The domain of the specified scheduler is different than the currently "
+            "active domain. Senders chained after this complete_on() will use the wrong "
+            "algorithm customizations.");
+          return {((_Self&&) __self).__sndr_,
+                  ((_Self&&) __self).__sched_,
+                  (_Receiver&&) __rcvr};
+        }
+
+        template <__sender_queries::__sender_query _Tag, class... _As>
+          requires __callable<_Tag, const _Sender&, _As...>
+        friend auto tag_invoke(_Tag __tag, const __sender& __self, _As&&... __as)
+          noexcept(__nothrow_callable<_Tag, const _Sender&, _As...>)
+          -> __call_result_if_t<__sender_queries::__sender_query<_Tag>, _Tag, const _Sender&, _As...> {
+          return ((_Tag&&) __tag)(__self.__sndr_, (_As&&) __as...);
+        }
+
+        template <__decays_to<__sender> _Self, class _Env>
+            requires (!__callable<get_scheduler_t, _Env>)
+          friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)
+            -> make_completion_signatures<
+                _Sender,
+                make_env_t<_Env, with_t<get_scheduler_t, _Scheduler>>>;
+      };
+
+    struct __complete_on_t {
+      template <sender _Sender, scheduler _Scheduler>
+        auto operator()(_Sender&& __sndr, _Scheduler&& __sched) const
+          -> __sender<__x<decay_t<_Sender>>, __x<decay_t<_Scheduler>>> {
+          return {(_Sender&&) __sndr, (_Scheduler&&) __sched};
+        }
+
+      template <scheduler _Scheduler>
+        auto operator()(_Scheduler&& __sched) const
+          -> __binder_back<__complete_on_t, decay_t<_Scheduler>> {
+          return {{}, {}, {(_Scheduler&&) __sched}};
+        }
+    };
+  } // namespace __complete_on
+  inline constexpr __complete_on::__complete_on_t complete_on {};
+
   /////////////////////////////////////////////////////////////////////////////
   // [execution.senders.transfer_just]
   namespace __transfer_just {
