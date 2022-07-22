@@ -2293,24 +2293,7 @@ namespace std::execution {
         using __sender = __sender<__x<remove_cvref_t<_Sender>>, __x<remove_cvref_t<_Fun>>>;
 
       template <sender _Sender, __movable_value _Fun>
-        requires __tag_invocable_with_completion_scheduler<then_t, set_value_t, _Sender, _Fun>
-      sender auto operator()(_Sender&& __sndr, _Fun __fun) const
-        noexcept(nothrow_tag_invocable<then_t, __completion_scheduler_for<_Sender, set_value_t>, _Sender, _Fun>) {
-        auto __sched = get_completion_scheduler<set_value_t>(__sndr);
-        return tag_invoke(then_t{}, std::move(__sched), (_Sender&&) __sndr, (_Fun&&) __fun);
-      }
-      template <sender _Sender, __movable_value _Fun>
-        requires (!__tag_invocable_with_completion_scheduler<then_t, set_value_t, _Sender, _Fun>) &&
-          tag_invocable<then_t, _Sender, _Fun>
-      sender auto operator()(_Sender&& __sndr, _Fun __fun) const
-        noexcept(nothrow_tag_invocable<then_t, _Sender, _Fun>) {
-        return tag_invoke(then_t{}, (_Sender&&) __sndr, (_Fun&&) __fun);
-      }
-      template <sender _Sender, __movable_value _Fun>
-        requires
-          (!__tag_invocable_with_completion_scheduler<then_t, set_value_t, _Sender, _Fun>) &&
-          (!tag_invocable<then_t, _Sender, _Fun>) &&
-          sender<__sender<_Sender, _Fun>>
+        requires sender<__sender<_Sender, _Fun>>
       __sender<_Sender, _Fun> operator()(_Sender&& __sndr, _Fun __fun) const {
         return __sender<_Sender, _Fun>{(_Sender&&) __sndr, (_Fun&&) __fun};
       }
@@ -2406,24 +2389,7 @@ namespace std::execution {
         using __sender = __sender<__x<remove_cvref_t<_Sender>>, __x<remove_cvref_t<_Fun>>>;
 
       template <sender _Sender, __movable_value _Fun>
-        requires __tag_invocable_with_completion_scheduler<upon_error_t, set_error_t, _Sender, _Fun>
-      sender auto operator()(_Sender&& __sndr, _Fun __fun) const
-        noexcept(nothrow_tag_invocable<upon_error_t, __completion_scheduler_for<_Sender, set_error_t>, _Sender, _Fun>) {
-        auto __sched = get_completion_scheduler<set_error_t>(__sndr);
-        return tag_invoke(upon_error_t{}, std::move(__sched), (_Sender&&) __sndr, (_Fun&&) __fun);
-      }
-      template <sender _Sender, __movable_value _Fun>
-        requires (!__tag_invocable_with_completion_scheduler<upon_error_t, set_error_t, _Sender, _Fun>) &&
-          tag_invocable<upon_error_t, _Sender, _Fun>
-      sender auto operator()(_Sender&& __sndr, _Fun __fun) const
-        noexcept(nothrow_tag_invocable<upon_error_t, _Sender, _Fun>) {
-        return tag_invoke(upon_error_t{}, (_Sender&&) __sndr, (_Fun&&) __fun);
-      }
-      template <sender _Sender, __movable_value _Fun>
-        requires
-          (!__tag_invocable_with_completion_scheduler<upon_error_t, set_error_t, _Sender, _Fun>) &&
-          (!tag_invocable<upon_error_t, _Sender, _Fun>) &&
-          sender<__sender<_Sender, _Fun>>
+        requires sender<__sender<_Sender, _Fun>>
       __sender<_Sender, _Fun> operator()(_Sender&& __sndr, _Fun __fun) const {
         return __sender<_Sender, _Fun>{(_Sender&&) __sndr, (_Fun&&) __fun};
       }
@@ -2517,25 +2483,7 @@ namespace std::execution {
         using __sender = __sender<__x<remove_cvref_t<_Sender>>, __x<remove_cvref_t<_Fun>>>;
 
       template <sender _Sender, __movable_value _Fun>
-        requires
-          __tag_invocable_with_completion_scheduler<upon_stopped_t, set_stopped_t, _Sender, _Fun> &&
-          __callable<_Fun>
-      sender auto operator()(_Sender&& __sndr, _Fun __fun) const
-        noexcept(nothrow_tag_invocable<upon_stopped_t, __completion_scheduler_for<_Sender, set_stopped_t>, _Sender, _Fun>) {
-        auto __sched = get_completion_scheduler<set_stopped_t>(__sndr);
-        return tag_invoke(upon_stopped_t{}, std::move(__sched), (_Sender&&) __sndr, (_Fun&&) __fun);
-      }
-      template <sender _Sender, __movable_value _Fun>
-        requires (!__tag_invocable_with_completion_scheduler<upon_stopped_t, set_stopped_t, _Sender, _Fun>) &&
-          tag_invocable<upon_stopped_t, _Sender, _Fun> && __callable<_Fun>
-      sender auto operator()(_Sender&& __sndr, _Fun __fun) const
-        noexcept(nothrow_tag_invocable<upon_stopped_t, _Sender, _Fun>) {
-        return tag_invoke(upon_stopped_t{}, (_Sender&&) __sndr, (_Fun&&) __fun);
-      }
-      template <sender _Sender, __movable_value _Fun>
-        requires (!__tag_invocable_with_completion_scheduler<upon_stopped_t, set_stopped_t, _Sender, _Fun>) &&
-          (!tag_invocable<upon_stopped_t, _Sender, _Fun>) && __callable<_Fun> &&
-          sender<__sender<_Sender, _Fun>>
+        requires sender<__sender<_Sender, _Fun>>
       __sender<_Sender, _Fun> operator()(_Sender&& __sndr, _Fun __fun) const {
         return __sender<_Sender, _Fun>{(_Sender&&) __sndr, (_Fun&&) __fun};
       }
@@ -2552,20 +2500,6 @@ namespace std::execution {
   // [execution.senders.adaptors.bulk]
   namespace __bulk {
     struct bulk_t {
-      template <sender _Sender, integral _Shape, __movable_value _Fun>
-        requires __tag_invocable_with_completion_scheduler<bulk_t, set_value_t, _Sender, _Shape, _Fun>
-      sender auto operator()(_Sender&& __sndr, _Shape __shape, _Fun __fun) const
-        noexcept(nothrow_tag_invocable<bulk_t, __completion_scheduler_for<_Sender, set_value_t>, _Sender, _Shape, _Fun>) {
-        auto __sched = get_completion_scheduler<set_value_t>(__sndr);
-        return tag_invoke(bulk_t{}, std::move(__sched), (_Sender&&) __sndr, (_Shape&&) __shape, (_Fun&&) __fun);
-      }
-      template <sender _Sender, integral _Shape, __movable_value _Fun>
-        requires (!__tag_invocable_with_completion_scheduler<bulk_t, set_value_t, _Sender, _Shape, _Fun>) &&
-          tag_invocable<bulk_t, _Sender, _Shape, _Fun>
-      sender auto operator()(_Sender&& __sndr, _Shape __shape, _Fun __fun) const
-        noexcept(nothrow_tag_invocable<bulk_t, _Sender, _Shape, _Fun>) {
-        return tag_invoke(bulk_t{}, (_Sender&&) __sndr, (_Shape&&) __shape, (_Fun&&) __fun);
-      }
       template <integral _Shape, class _Fun>
       __binder_back<bulk_t, _Shape, _Fun> operator()(_Shape __shape, _Fun __fun) const {
         return {{}, {}, {(_Shape&&) __shape, (_Fun&&) __fun}};
@@ -2803,22 +2737,6 @@ namespace std::execution {
         using __sender = __sender<__x<remove_cvref_t<_Sender>>>;
 
       template <sender _Sender>
-        requires __tag_invocable_with_completion_scheduler<split_t, set_value_t, _Sender>
-      sender auto operator()(_Sender&& __sndr) const
-        noexcept(nothrow_tag_invocable<split_t, __completion_scheduler_for<_Sender, set_value_t>, _Sender>) {
-        auto __sched = get_completion_scheduler<set_value_t>(__sndr);
-        return tag_invoke(split_t{}, std::move(__sched), (_Sender&&) __sndr);
-      }
-      template <sender _Sender>
-        requires (!__tag_invocable_with_completion_scheduler<split_t, set_value_t, _Sender>) &&
-          tag_invocable<split_t, _Sender>
-      sender auto operator()(_Sender&& __sndr) const
-        noexcept(nothrow_tag_invocable<split_t, _Sender>) {
-        return tag_invoke(split_t{}, (_Sender&&) __sndr);
-      }
-      template <sender _Sender>
-        requires (!__tag_invocable_with_completion_scheduler<split_t, set_value_t, _Sender>) &&
-          (!tag_invocable<split_t, _Sender>)
       __sender<_Sender> operator()(_Sender&& __sndr) const {
         return __sender<_Sender>{(_Sender&&) __sndr};
       }
@@ -3128,23 +3046,7 @@ namespace std::execution {
             using __sender = __impl::__sender<__x<remove_cvref_t<_Sender>>, __x<remove_cvref_t<_Fun>>, _LetTag>;
 
           template <sender _Sender, __movable_value _Fun>
-            requires __tag_invocable_with_completion_scheduler<_LetTag, set_value_t, _Sender, _Fun>
-          sender auto operator()(_Sender&& __sndr, _Fun __fun) const
-            noexcept(nothrow_tag_invocable<_LetTag, __completion_scheduler_for<_Sender, set_value_t>, _Sender, _Fun>) {
-            auto __sched = get_completion_scheduler<set_value_t>(__sndr);
-            return tag_invoke(_LetTag{}, std::move(__sched), (_Sender&&) __sndr, (_Fun&&) __fun);
-          }
-          template <sender _Sender, __movable_value _Fun>
-            requires (!__tag_invocable_with_completion_scheduler<_LetTag, set_value_t, _Sender, _Fun>) &&
-              tag_invocable<_LetTag, _Sender, _Fun>
-          sender auto operator()(_Sender&& __sndr, _Fun __fun) const
-            noexcept(nothrow_tag_invocable<_LetTag, _Sender, _Fun>) {
-            return tag_invoke(_LetTag{}, (_Sender&&) __sndr, (_Fun&&) __fun);
-          }
-          template <sender _Sender, __movable_value _Fun>
-            requires (!__tag_invocable_with_completion_scheduler<_LetTag, set_value_t, _Sender, _Fun>) &&
-              (!tag_invocable<_LetTag, _Sender, _Fun>) &&
-              sender<__sender<_Sender, _Fun>>
+            requires sender<__sender<_Sender, _Fun>>
           __sender<_Sender, _Fun> operator()(_Sender&& __sndr, _Fun __fun) const {
             return __sender<_Sender, _Fun>{(_Sender&&) __sndr, (_Fun&&) __fun};
           }
@@ -3770,7 +3672,7 @@ namespace std::execution {
       __binder_back<transfer_t, decay_t<_Scheduler>> operator()(_Scheduler&& __sched) const {
         return {{}, {}, {(_Scheduler&&) __sched}};
       }
-    } ;
+    };
   } // namespace __transfer
   using __transfer::transfer_t;
   inline constexpr transfer_t transfer{};
@@ -4256,14 +4158,6 @@ namespace std::execution {
         -> __complete_on_fn<__x<_Sender>, __x<_Scheduler>, __x<_Closure>>;
 
     struct on_t {
-      template <scheduler _Scheduler, sender _Sender>
-        requires tag_invocable<on_t, _Scheduler, _Sender>
-      auto operator()(_Scheduler&& __sched, _Sender&& __sndr) const
-        noexcept(nothrow_tag_invocable<on_t, _Scheduler, _Sender>)
-        -> tag_invoke_result_t<on_t, _Scheduler, _Sender> {
-        return tag_invoke(*this, (_Scheduler&&) __sched, (_Sender&&) __sndr);
-      }
-
       // TODO wrap this in its own sender with a custom tag type
       template <scheduler _Scheduler, sender _Sender>
       auto operator()(_Scheduler&& __sched, _Sender&& __sndr) const {
@@ -4821,18 +4715,7 @@ namespace std::execution {
 
     struct when_all_t {
       template <sender... _Senders>
-        requires tag_invocable<when_all_t, _Senders...> &&
-          sender<tag_invoke_result_t<when_all_t, _Senders...>> &&
-          (sizeof...(_Senders) > 0)
-      auto operator()(_Senders&&... __sndrs) const
-        noexcept(nothrow_tag_invocable<when_all_t, _Senders...>)
-        -> tag_invoke_result_t<when_all_t, _Senders...> {
-        return tag_invoke(*this, (_Senders&&) __sndrs...);
-      }
-
-      template <sender... _Senders>
-          requires (!tag_invocable<when_all_t, _Senders...>) &&
-            (sizeof...(_Senders) > 0)
+          requires (sizeof...(_Senders) > 0)
       auto operator()(_Senders&&... __sndrs) const
         -> __impl::__sender<__x<decay_t<_Senders>>...> {
         return __impl::__sender<__x<decay_t<_Senders>>...>{
@@ -4842,17 +4725,7 @@ namespace std::execution {
 
     struct when_all_with_variant_t {
       template <sender... _Senders>
-        requires tag_invocable<when_all_with_variant_t, _Senders...> &&
-          sender<tag_invoke_result_t<when_all_with_variant_t, _Senders...>>
-      auto operator()(_Senders&&... __sndrs) const
-        noexcept(nothrow_tag_invocable<when_all_with_variant_t, _Senders...>)
-        -> tag_invoke_result_t<when_all_with_variant_t, _Senders...> {
-        return tag_invoke(*this, (_Senders&&) __sndrs...);
-      }
-
-      template <sender... _Senders>
-        requires (!tag_invocable<when_all_with_variant_t, _Senders...>) &&
-          (__callable<into_variant_t, _Senders> &&...)
+        requires (__callable<into_variant_t, _Senders> &&...)
       auto operator()(_Senders&&... __sndrs) const {
           return when_all_t{}(into_variant((_Senders&&) __sndrs)...);
       }
