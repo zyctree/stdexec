@@ -289,7 +289,7 @@ TEST_CASE("let_error overrides error_types from input sender (and adds std::exce
   error_scheduler<int> sched3{43};
 
   // Returning ex::just_error
-  check_err_types<type_array<>>( //
+  check_err_types<type_array<std::exception_ptr, std::string>>( //
       ex::just() | ex::transfer(sched1)                                 //
       | ex::let_error([](std::exception_ptr) { return ex::just_error(std::string{"err"}); }));
   check_err_types<type_array<std::exception_ptr, std::string>>( //
@@ -302,7 +302,7 @@ TEST_CASE("let_error overrides error_types from input sender (and adds std::exce
         }));
 
   // Returning ex::just
-  check_err_types<type_array<>>( //
+  check_err_types<type_array<std::exception_ptr>>( //
       ex::just() | ex::transfer(sched1)                    //
       | ex::let_error([](std::exception_ptr) { return ex::just(); }));
   check_err_types<type_array<std::exception_ptr>>( //

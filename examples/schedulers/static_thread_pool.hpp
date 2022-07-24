@@ -155,7 +155,9 @@ namespace example {
           auto stoken =
             std::execution::get_stop_token(
               std::execution::get_env(op.receiver_));
-          if (stoken.stop_requested()) {
+          if constexpr (std::unstoppable_token<decltype(stoken)>) {
+            std::execution::set_value((Receiver &&) op.receiver_);
+          } else if (stoken.stop_requested()) {
             std::execution::set_stopped((Receiver &&) op.receiver_);
           } else {
             std::execution::set_value((Receiver &&) op.receiver_);

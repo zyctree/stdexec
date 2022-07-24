@@ -102,7 +102,7 @@ TEST_CASE("stopped_as_error keeps error_types from input sender", "[adaptors][st
   error_scheduler sched2{};
   error_scheduler<int> sched3{-1};
 
-  check_err_types<type_array<>>( //
+  check_err_types<type_array<std::exception_ptr>>( //
       ex::just(11) | ex::transfer(sched1) | ex::stopped_as_error(std::exception_ptr{}));
   check_err_types<type_array<std::exception_ptr>>( //
       ex::just(13) | ex::transfer(sched2) | ex::stopped_as_error(std::exception_ptr{}));
@@ -116,7 +116,7 @@ TEST_CASE("stopped_as_error can add more types to error_types", "[adaptors][stop
   error_scheduler sched2{};
   error_scheduler<int> sched3{-1};
 
-  check_err_types<type_array<>>( //
+  check_err_types<type_array<std::exception_ptr>>( //
       ex::just(11) | ex::transfer(sched1) | ex::stopped_as_error(-1));
   check_err_types<type_array<std::exception_ptr, int>>( //
       ex::just(13) | ex::transfer(sched2) | ex::stopped_as_error(-1));
@@ -124,7 +124,7 @@ TEST_CASE("stopped_as_error can add more types to error_types", "[adaptors][stop
   check_err_types<type_array<std::exception_ptr, int>>( //
       ex::just(13) | ex::transfer(sched3) | ex::stopped_as_error(-1));
 
-  check_err_types<type_array<>>( //
+  check_err_types<type_array<std::exception_ptr>>( //
       ex::just(11) | ex::transfer(sched1)                //
       | ex::stopped_as_error(-1)                   //
       | ex::stopped_as_error(std::string{"err"}));
