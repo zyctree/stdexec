@@ -46,6 +46,9 @@ namespace std {
   template <class _T>
     using __x = __t<__x_<_T>>;
 
+  template <class...>
+    struct __undef;
+
   template <bool _B>
     using __bool = bool_constant<_B>;
 
