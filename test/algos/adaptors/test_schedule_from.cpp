@@ -194,26 +194,28 @@ TEST_CASE("schedule_from keeps sends_stopped from scheduler's sender", "[adaptor
 }
 
 namespace {
-namespace custom {
-struct domain {};
-using inline_scheduler = basic_inline_scheduler<domain>;
+  namespace custom {
+    struct domain {};
 
-using just_string_sender_t =
-    decltype(ex::schedule_from(custom::inline_scheduler{}, ex::just(std::string{"transfer"})));
-
-// Customization of schedule_from
-// Return a sender of a different value
-template <ex::receiver_from<just_string_sender_t> Receiver>
-auto tag_invoke(ex::schedule_from_t, domain, just_string_sender_t, Receiver&& rcvr) {
-  return ex::connect(ex::just(std::string{"hijacked"}), std::move(rcvr));
-}
-}
-}
+    // Customization of schedule_from
+    // Return a sender of a different value
+    ex::sender_of<ex::no_env, std::string> auto tag_invoke(
+      ex::connect_transform_t,
+      custom::domain,
+      ex::schedule_from_t,
+      ex::sender_of<ex::no_env, std::string> auto&& sched_from,
+      auto&& env) {
+      // auto &&[sched, snd] = sched_from;
+      return ex::just(std::string{"hijacked"});
+    }
+  } // namespace custom
+} // anonymous namespace
+using custom_inline_scheduler = basic_inline_scheduler<custom::domain>;
 
 TEST_CASE("schedule_from can be customized", "[adaptors][schedule_from]") {
   // The customization will return a different value
   auto snd =
-      ex::schedule_from(custom::inline_scheduler{}, ex::just(std::string{"transfer"}))
+      ex::schedule_from(custom_inline_scheduler{}, ex::just(std::string{"transfer"}))
     | ex::complete_on(inline_scheduler{});
   auto op = ex::connect(std::move(snd), expect_value_receiver<std::string>("hijacked"));
   ex::start(op);

@@ -361,6 +361,67 @@ namespace std::execution {
       };
 
   /////////////////////////////////////////////////////////////////////////////
+  // [execution.general.queries], general queries
+  namespace __general_queries {
+    struct get_domain_t {
+      template <__none_of<no_env> _Ty>
+        requires tag_invocable<get_domain_t, const _Ty&>
+      auto operator()(const _Ty& __ty) const noexcept
+        -> tag_invoke_result_t<get_domain_t, const _Ty&> {
+        static_assert(
+          nothrow_tag_invocable<get_domain_t, const _Ty&>,
+          "Customizations of get_domain must be noexcept.");
+        return tag_invoke(get_domain_t{}, __ty);
+      }
+    };
+  } // __general_queries
+
+  using __general_queries::get_domain_t;
+  inline constexpr get_domain_t get_domain{};
+
+  template <__none_of<void> _T>
+    using __not_void = _T;
+
+  template <class _T>
+    using domain_of_t =
+      __not_void<__call_result_t<get_domain_t, _T>>;
+
+  template <class _Sender, class _Env>
+    using __domain_t =
+      __minvoke<
+        __q1<domain_of_t>,
+        __if_c<__valid1<domain_of_t, _Sender>, _Sender, _Env>>;
+
+  /////////////////////////////////////////////////////////////////////////////
+  // [execution.sender_transform]
+  namespace __sndr_tfx {
+    struct sender_transform_t;
+
+    template <class _Value, class _Env>
+      concept __with_tag_invoke =
+        tag_invocable<sender_transform_t, _Value, _Env>;
+
+    struct sender_transform_t {
+      template <class _Value, class _Env = no_env>
+        constexpr decltype(auto) operator()(_Value&& __val, const _Env& __env = {}) const
+            noexcept(!tag_invocable<sender_transform_t, _Value, _Env> ||
+              nothrow_tag_invocable<sender_transform_t, _Value, _Env>) {
+          static_assert(sizeof(_Value), "Incomplete type used with sender_transform");
+          static_assert(sizeof(_Env), "Incomplete type used with sender_transform");
+
+          if constexpr (tag_invocable<sender_transform_t, _Value, _Env>) {
+            return tag_invoke(*this, (_Value&&) __val, __env);
+          } else {
+            return (_Value&&) __val;
+          }
+        }
+    };
+  } // namespace __sndr_tfx
+
+  using __sndr_tfx::sender_transform_t;
+  inline constexpr sender_transform_t sender_transform {};
+
+  /////////////////////////////////////////////////////////////////////////////
   // [execution.sndtraits]
   namespace __get_completion_signatures {
     template <class _Sender, class _Env>
@@ -865,40 +926,19 @@ namespace std::execution {
       }
       auto operator()() const noexcept;
     };
-
-    struct get_domain_t {
-      template <__none_of<no_env> _Ty>
-        requires tag_invocable<get_domain_t, const _Ty&>
-      auto operator()(const _Ty& __ty) const noexcept
-        -> tag_invoke_result_t<get_domain_t, const _Ty&> {
-        static_assert(
-          nothrow_tag_invocable<get_domain_t, const _Ty&>,
-          "Customizations of get_domain must be noexcept.");
-        return tag_invoke(get_domain_t{}, __ty);
-      }
-    };
   } // namespace __general_queries
   using __general_queries::get_allocator_t;
   using __general_queries::get_scheduler_t;
   using __general_queries::get_delegatee_scheduler_t;
   using __general_queries::get_stop_token_t;
-  using __general_queries::get_domain_t;
   inline constexpr get_scheduler_t get_scheduler{};
   inline constexpr get_delegatee_scheduler_t get_delegatee_scheduler{};
   inline constexpr get_allocator_t get_allocator{};
   inline constexpr get_stop_token_t get_stop_token{};
-  inline constexpr get_domain_t get_domain{};
 
   template <class _T>
     using stop_token_of_t =
       remove_cvref_t<decltype(get_stop_token(__declval<_T>()))>;
-
-  template <__none_of<void> _T>
-    using __not_void = _T;
-
-  template <class _T>
-    using domain_of_t =
-      __not_void<__call_result_t<get_domain_t, _T>>;
 
   template <class _SchedulerProvider>
     concept __scheduler_provider =
@@ -1105,6 +1145,91 @@ namespace std::execution {
   inline constexpr __connect_awaitable_t __connect_awaitable{};
 
   /////////////////////////////////////////////////////////////////////////////
+  // [execution.senders.connect_transform]
+  namespace __connect_tfx {
+    struct connect_transform_t;
+
+    // template <class _Sender, class _Env, class _Tag = connect_transform_t>
+    //     requires __valid2<__domain_t, _Sender, _Env> &&
+    //       (__v<__aggregate_member_count<_Sender>> != 0)
+    //   decltype(auto) __try_transform(_Sender&& __sndr, _Env&& __env) {
+    //     auto __fun =
+    //       [&]<class... _Members>(_Members&&... __mbrs) -> decltype(auto)
+    //         requires (tag_invocable<
+    //                     connect_transform_t,
+    //                     __domain_t<_Sender, _Env>,
+    //                     _Env,
+    //                     tag_of_t<_Sender>,
+    //                     _Members...>) {
+    //         return tag_invoke(
+    //           _Tag{},
+    //           __domain_t<_Sender, _Env>{},
+    //           (_Env&&) __env,
+    //           tag_of_t<_Sender>{},
+    //           (_Members&&) __mbrs...);
+    //       };
+    //     using _Fn = decltype(__fun);
+    //     if constexpr (__magic_applicable<_Fn, _Sender>) {
+    //       return __magic_apply((_Fn&&) __fun, (_Sender&&) __sndr);
+    //     } else {
+    //       return __{};
+    //     }
+    //   }
+
+    // template <class _Sender, class _Env>
+    //   concept __transformable =
+    //     requires (_Sender&& __sndr, _Env&& __env) {
+    //       { (__try_transform)((_Sender&&) __sndr, (_Env&&) __env) } -> __none_of<__>;
+    //     };
+
+    // template <class _Sender, class _Env>
+    //   using __transform_result_t =
+    //     decltype((__try_transform)(__declval<_Sender>(), __declval<_Env>()));
+
+    // struct connect_transform_t {
+    //   template <sender _Sender, class _Env>
+    //       requires __transformable<_Sender, _Env>
+    //     auto operator()(_Sender&& __sndr, _Env&& __env) const
+    //       -> __transform_result_t<_Sender, _Env> {
+    //       return (__try_transform)((_Sender&&) __sndr, (_Env&&) __env);
+    //     }
+    // };
+
+    struct connect_transform_t {
+      template <sender _Sender, class _Env>
+          requires tag_invocable<
+            connect_transform_t,
+            __domain_t<_Sender, _Env>,
+            tag_of_t<_Sender>,
+            _Sender,
+            _Env>
+        auto operator()(_Sender&& __sndr, _Env&& __env) const
+          noexcept(nothrow_tag_invocable<
+            connect_transform_t,
+            __domain_t<_Sender, _Env>,
+            tag_of_t<_Sender>,
+            _Sender,
+            _Env>)
+          -> tag_invoke_result_t<
+              connect_transform_t,
+              __domain_t<_Sender, _Env>,
+              tag_of_t<_Sender>,
+              _Sender,
+              _Env> {
+          return tag_invoke(
+            connect_transform_t{},
+            __domain_t<_Sender, _Env>{},
+            tag_of_t<_Sender>{},
+            (_Sender&&) __sndr,
+            (_Env&&) __env);
+        }
+    };
+  } // namespace __connect_tfx
+
+  using __connect_tfx::connect_transform_t;
+  inline constexpr connect_transform_t connect_transform {};
+
+  /////////////////////////////////////////////////////////////////////////////
   // [execution.senders.connect]
   namespace __connect {
     struct __is_debug_env_t {
@@ -1150,29 +1275,27 @@ namespace std::execution {
     struct connect_t;
 
     template <class _Sender, class _Receiver>
-      using __domain_t =
-        __minvoke<
-          __q1<domain_of_t>,
-          __if_c<__valid1<domain_of_t, _Sender>, _Sender, env_of_t<_Receiver>>>;
-
-    template <class _Sender, class _Receiver>
-      concept __connectable_with_domain =
-        sender<_Sender, env_of_t<_Receiver>> &&
-        receiver_from<_Receiver, _Sender> &&
-        __valid2<__domain_t, _Sender, _Receiver> &&
-        tag_invocable<tag_of_t<_Sender>, __domain_t<_Sender, _Receiver>, _Sender, _Receiver>;
-
-    template <class _Sender, class _Receiver>
       concept __connectable_with_tag_invoke =
         sender<_Sender, env_of_t<_Receiver>> &&
         receiver_from<_Receiver, _Sender> &&
         tag_invocable<connect_t, _Sender, _Receiver>;
 
+    template <class _Sender, class _Receiver>
+      concept __connectable_with_transform =
+        sender<_Sender, env_of_t<_Receiver>> &&
+        receiver_from<_Receiver, _Sender> &&
+        __callable<connect_transform_t, _Sender, env_of_t<_Receiver>> &&
+        __connectable_with_tag_invoke<
+          __call_result_t<connect_transform_t, _Sender, env_of_t<_Receiver>>,
+          _Receiver>;
+
     struct connect_t {
       template <class _Sender, class _Receiver>
       static constexpr bool __nothrow_connect() noexcept {
-        if constexpr (__connectable_with_domain<_Sender, _Receiver>){
-          return nothrow_tag_invocable<tag_of_t<_Sender>, __domain_t<_Sender, _Receiver>, _Sender, _Receiver>;
+        if constexpr (__connectable_with_transform<_Sender, _Receiver>){
+          // BUGBUG TODO
+          return false;
+          //return nothrow_tag_invocable<tag_of_t<_Sender>, __domain_t<_Sender, _Receiver>, _Sender, _Receiver>;
         } else if constexpr (__connectable_with_tag_invoke<_Sender, _Receiver>) {
           return nothrow_tag_invocable<connect_t, _Sender, _Receiver>;
         } else {
@@ -1181,20 +1304,24 @@ namespace std::execution {
       }
 
       template <class _Sender, class _Receiver>
-        requires __connectable_with_domain<_Sender, _Receiver> ||
+        requires __connectable_with_transform<_Sender, _Receiver> ||
           __connectable_with_tag_invoke<_Sender, _Receiver> ||
           __callable<__connect_awaitable_t, _Sender, _Receiver> ||
           tag_invocable<__is_debug_env_t, env_of_t<_Receiver>>
       auto operator()(_Sender&& __sndr, _Receiver&& __rcvr) const
           noexcept(__nothrow_connect<_Sender, _Receiver>()) {
-        if constexpr (__connectable_with_domain<_Sender, _Receiver>) {
-          using _Tag = tag_of_t<_Sender>;
-          using _Domain = __domain_t<_Sender, _Receiver>;
+        if constexpr (__connectable_with_transform<_Sender, _Receiver>) {
+          using _TfxSender =
+            __call_result_t<connect_transform_t, _Sender, env_of_t<_Receiver>>;
           static_assert(
-            operation_state<tag_invoke_result_t<_Tag, _Domain, _Sender, _Receiver>>,
+            operation_state<tag_invoke_result_t<connect_t, _TfxSender, _Receiver>>,
             "execution::connect(sender, receiver) must return a type that "
             "satisfies the operation_state concept");
-          return tag_invoke(_Tag{}, _Domain{}, (_Sender&&) __sndr, (_Receiver&&) __rcvr);
+          auto&& __env = get_env(__rcvr);
+          return tag_invoke(
+            connect_t{},
+            connect_transform((_Sender&&) __sndr, (decltype(__env)) __env),
+            (_Receiver&&) __rcvr);
         } else if constexpr (__connectable_with_tag_invoke<_Sender, _Receiver>) {
           static_assert(
             operation_state<tag_invoke_result_t<connect_t, _Sender, _Receiver>>,
@@ -2841,7 +2968,7 @@ namespace std::execution {
           template <class... _As>
               requires invocable<_Fun, _As...>
             invoke_result_t<_Fun, _As...> operator()(_As&&...) const {
-                terminate(); // this is never called; but we need a body
+              terminate(); // this is never called; but we need a body
             }
         };
 

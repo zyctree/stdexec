@@ -53,7 +53,7 @@ namespace std {
     using __bool = bool_constant<_B>;
 
   template <size_t _N>
-    using __index = integral_constant<size_t, _N>;
+    using __msize_t = char(*)[_N+1];
 
   // Some utilities for manipulating lists of types at compile time
   template <class...>
@@ -77,6 +77,10 @@ namespace std {
 
   template <class _T, _T _I>
     inline constexpr _T __v<integral_constant<_T, _I>> = _I;
+
+  // To support __msize_t:
+  template <class _T, size_t _N>
+    inline constexpr size_t __v<_T(*)[_N]> = _N - 1;
 
   template <template <class...> class _Fn>
     struct __q {
@@ -432,6 +436,12 @@ namespace std {
   template <class>
     void __declval() noexcept;
 
+  template <class _T>
+    _T __declval_ex() noexcept requires true;
+
+  template <class>
+    void __declval_ex() noexcept;
+
   // For copying cvref from one type to another:
   template <class _Member, class _Self>
     _Member _Self::*__memptr(const _Self&);
@@ -518,11 +528,11 @@ namespace std {
     };
 
   template <size_t... _Indices>
-    auto __mconvert_indices(index_sequence<_Indices...>)
-      -> __types<__index<_Indices>...>;
+    auto __mconvert_indices(index_sequence<_Indices...>*)
+      -> __types<__msize_t<_Indices>...>;
   template <size_t _N>
     using __mmake_index_sequence =
-      decltype(__mconvert_indices(make_index_sequence<_N>{}));
+      decltype(__mconvert_indices((make_index_sequence<_N>*) nullptr));
   template <class... _Ts>
     using __mindex_sequence_for =
       __mmake_index_sequence<sizeof...(_Ts)>;
@@ -531,4 +541,147 @@ namespace std {
     using __mand = __bool<(__v<_Bools> &&...)>;
   template <class... _Bools>
     using __mor = __bool<(__v<_Bools> ||...)>;
+
+  template <class _N, class _T, class _Continuation = __q<__types>>
+    using __mfill_n =
+      __mapply<
+        __transform<
+          __mconst<_T>,
+          _Continuation>,
+        __mmake_index_sequence<__v<_N>>>;
+
+  struct __m_any {
+    template <class _T>
+      operator _T&& () const;
+  };
+
+  template <size_t _N>
+    struct __mpriority_
+      : __mpriority_<_N - 1> {
+      using value_type = size_t;
+      using type = __mpriority_<_N>;
+      static constexpr size_t value = _N;
+    };
+
+  template <size_t _N>
+    inline constexpr size_t __mpriority_<_N>::value;
+
+  template <>
+    struct __mpriority_<0u> {
+      using value_type = size_t;
+      using type = __mpriority_<0u>;
+      static constexpr size_t value = 0;
+    };
+
+  inline constexpr size_t __mpriority_<0u>::value;
+
+  template <size_t _N>
+    using __mpriority = __mpriority_<_N>*;
+
+  template <size_t _N>
+    inline constexpr size_t __v<__mpriority<_N>> = _N;
+
+  template <class _T, class... _Ts>
+    concept __aggregate_initializable_with =
+      is_aggregate_v<_T> &&
+      requires (_Ts(*... __ts)() noexcept) {
+        _T{__ts()...};
+      };
+
+  template <class _T, class... _Ts>
+    using __cmembers_ = __msize_t<__aggregate_initializable_with<_T, _Ts...> ? sizeof...(_Ts) : 0>;
+
+  inline constexpr size_t __max_aggregate_members = 16;
+
+  template <class _A, class _B>
+    using __mmax_ = __if_c<(__v<_A> < __v<_B>), _B, _A>;
+
+  template <class _BinPred = __q2<__mmax_>, class _Init = __msize_t<0>>
+    using __mmax = __fold_right<_Init, _BinPred>;
+
+  template <class _T>
+    using __aggregate_member_count =
+      __mapply<
+        __transform<
+          __mbind_back1<__q3<__mfill_n>, __m_any, __mbind_front_q<__cmembers_, _T>>,
+          __mmax<>>,
+        __mmake_index_sequence<__max_aggregate_members>>;
+
+  #define _FWD(_X) ((decltype(_X)&&) _X)
+
+  template <class _Fn, class _T>
+    static constexpr decltype(auto) __call_with_members_of(_Fn __fun, _T&& __t) {
+      constexpr size_t __cmembers = __v<__aggregate_member_count<_T>>;
+      if constexpr (__cmembers == 0) {
+        return ((_Fn&&) __fun)();
+      } else if constexpr (__cmembers == 1) {
+        auto &&[_0] = (_T&&) __t;
+        return ((_Fn&&) __fun)(_FWD(_0));
+      } else if constexpr (__cmembers == 2) {
+        auto &&[_0, _1] = (_T&&) __t;
+        return ((_Fn&&) __fun)(_FWD(_0), _FWD(_1));
+      } else if constexpr (__cmembers == 3) {
+        auto &&[_0, _1, _2] = (_T&&) __t;
+        return ((_Fn&&) __fun)(_FWD(_0), _FWD(_1), _FWD(_2));
+      } else if constexpr (__cmembers == 4) {
+        auto &&[_0, _1, _2, _3] = (_T&&) __t;
+        return ((_Fn&&) __fun)(_FWD(_0), _FWD(_1), _FWD(_2), _FWD(_3));
+      } else if constexpr (__cmembers == 5) {
+        auto &&[_0, _1, _2, _3, _4] = (_T&&) __t;
+        return ((_Fn&&) __fun)(_FWD(_0), _FWD(_1), _FWD(_2), _FWD(_3), _FWD(_4));
+      } else if constexpr (__cmembers == 6) {
+        auto &&[_0, _1, _2, _3, _4, _5] = (_T&&) __t;
+        return ((_Fn&&) __fun)(_FWD(_0), _FWD(_1), _FWD(_2), _FWD(_3), _FWD(_4), _FWD(_5));
+      } else if constexpr (__cmembers == 7) {
+        auto &&[_0, _1, _2, _3, _4, _5, _6] = (_T&&) __t;
+        return ((_Fn&&) __fun)(_FWD(_0), _FWD(_1), _FWD(_2), _FWD(_3), _FWD(_4), _FWD(_5),
+                                _FWD(_6));
+      } else {
+        static_assert(__cmembers < 8, "NOT IMPLEMENTED YET"); // TODO
+        return;
+      }
+    }
+
+  struct __call_with_members_of_impl {
+    template <class... _Ts>
+      auto operator()(_Ts&&...) const noexcept {
+        return __mbind_back_q1<invoke_result_t, _Ts...>{};
+      }
+  };
+
+  template <class _T>
+    using __callable_with_members_of_t =
+      decltype((__call_with_members_of)(
+        __call_with_members_of_impl{},
+        __declval<_T>()));
+
+  template <class _Fn, class _T>
+    concept __callable_with_members_of =
+      is_aggregate_v<_T> &&
+      (__v<__aggregate_member_count<_T>> != 0) &&
+      __valid2<__minvoke1, __callable_with_members_of_t<_T>, _Fn>;
+
+  template <class _Fn, class _T>
+    using __callable_with_members_of_result_t =
+      __minvoke1<__callable_with_members_of_t<_T>, _Fn>;
+
+  inline constexpr struct __magic_apply_t {
+    template <class _T, __callable_with_members_of<_T> _Fn>
+      constexpr auto operator()(_Fn __fun, _T&& __t) const
+        -> __callable_with_members_of_result_t<_Fn, _T> {
+        return (__call_with_members_of)((_Fn&&) __fun, (_T&&) __t);
+      }
+  } __magic_apply {};
+
+  template <class _Fn, class _T>
+    concept __magic_applicable =
+      requires (_Fn&& __fun, _T&& __t) {
+        __magic_apply((_Fn&&) __fun, (_T&&) __t);
+      };
+
+  template <class _Fn, class _T>
+    using __magic_apply_result_t =
+      decltype(__magic_apply(__declval<_Fn>(), __declval<_T>()));
+
+  #undef _FWD
 }
