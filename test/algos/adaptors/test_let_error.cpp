@@ -144,7 +144,7 @@ TEST_CASE("let_error function is not called on regular flow", "[adaptors][let_er
 TEST_CASE("let_error function is not called when cancelled", "[adaptors][let_error]") {
   bool called{false};
   stopped_scheduler sched;
-  ex::sender auto snd = ex::just(13) | ex::transfer(sched) //
+  ex::sender auto snd = ex::unscoped_transfer(ex::just(13), sched) //
                         | ex::let_error([&](std::exception_ptr) {
                             called = true;
                             return ex::just(0);
@@ -202,7 +202,7 @@ TEST_CASE("let_error exposes a parameter that is destructed when the main operat
                         | ex::let_error([&](const my_type& obj) {
                             CHECK_FALSE(param_destructed);
                             fun_called = true;
-                            return ex::just(13) | ex::transfer(sched);
+                            return ex::unscoped_transfer(ex::just(13), sched);
                           });
   int res{0};
   {
@@ -290,26 +290,26 @@ TEST_CASE("let_error overrides error_types from input sender (and adds std::exce
 
   // Returning ex::just_error
   check_err_types<type_array<std::exception_ptr, std::string>>( //
-      ex::just() | ex::transfer(sched1)                                 //
+      ex::unscoped_transfer(ex::just(), sched1)                                 //
       | ex::let_error([](std::exception_ptr) { return ex::just_error(std::string{"err"}); }));
   check_err_types<type_array<std::exception_ptr, std::string>>( //
-      ex::just() | ex::transfer(sched2)                                 //
+      ex::unscoped_transfer(ex::just(), sched2)                                 //
       | ex::let_error([](std::exception_ptr) { return ex::just_error(std::string{"err"}); }));
   check_err_types<type_array<std::exception_ptr, std::string>>( //
-      ex::just() | ex::transfer(sched3)                                 //
+      ex::unscoped_transfer(ex::just(), sched3)                                 //
       | ex::let_error([](std::__one_of<int, std::exception_ptr> auto) {
           return ex::just_error(std::string{"err"});
         }));
 
   // Returning ex::just
   check_err_types<type_array<std::exception_ptr>>( //
-      ex::just() | ex::transfer(sched1)                    //
+      ex::unscoped_transfer(ex::just(), sched1)                    //
       | ex::let_error([](std::exception_ptr) { return ex::just(); }));
   check_err_types<type_array<std::exception_ptr>>( //
-      ex::just() | ex::transfer(sched2)                    //
+      ex::unscoped_transfer(ex::just(), sched2)                    //
       | ex::let_error([](std::exception_ptr) { return ex::just(); }));
   check_err_types<type_array<std::exception_ptr>>( //
-      ex::just() | ex::transfer(sched3)                    //
+      ex::unscoped_transfer(ex::just(), sched3)                    //
       | ex::let_error([](std::__one_of<int, std::exception_ptr> auto) { return ex::just(); }));
 }
 
@@ -319,11 +319,11 @@ TEST_CASE("let_error keeps sends_stopped from input sender", "[adaptors][let_err
   stopped_scheduler sched3{};
 
   check_sends_stopped<false>( //
-      ex::just() | ex::transfer(sched1) | ex::let_error([](std::exception_ptr) { return ex::just(); }));
+      ex::unscoped_transfer(ex::just(), sched1) | ex::let_error([](std::exception_ptr) { return ex::just(); }));
   check_sends_stopped<true>( //
-      ex::just() | ex::transfer(sched2) | ex::let_error([](std::exception_ptr) { return ex::just(); }));
+      ex::unscoped_transfer(ex::just(), sched2) | ex::let_error([](std::exception_ptr) { return ex::just(); }));
   check_sends_stopped<true>( //
-      ex::just() | ex::transfer(sched3) | ex::let_error([](std::exception_ptr) { return ex::just(); }));
+      ex::unscoped_transfer(ex::just(), sched3) | ex::let_error([](std::exception_ptr) { return ex::just(); }));
 }
 
 #endif

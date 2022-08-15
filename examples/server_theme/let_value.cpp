@@ -37,7 +37,7 @@
  *
  * Example goals:
  * - show how one can break more complex flows into steps with let_* functions
- * - exemplify the use of let_value, let_error, let_stopped, transfer, and just
+ * - exemplify the use of let_value, let_error, let_stopped, unscoped_transfer, and just
  * algorithms
  */
 #if defined(__GNUC__) && !defined(__clang__)
@@ -79,7 +79,7 @@ ex::sender auto schedule_request_start(S sched, int idx) {
   std::cout << "HTTP request " << idx << " arrived\n";
 
   // Return a sender for the incoming http_request
-  return ex::just(std::move(req)) | ex::transfer(std::forward<S>(sched));
+  return ex::unscoped_transfer(ex::just(std::move(req)), std::forward<S>(sched));
 }
 
 // Sends a response back to the client; yields a void signal on success

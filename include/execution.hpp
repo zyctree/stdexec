@@ -1980,7 +1980,7 @@ namespace std::execution {
     template <class _Fun, class... _As>
     struct __binder_back : sender_adaptor_closure<__binder_back<_Fun, _As...>> {
       [[no_unique_address]] _Fun __fun_;
-      tuple<_As...> __as_;
+      [[no_unique_address]] tuple<_As...> __as_;
 
       template <sender _Sender>
         requires __callable<_Fun, _Sender, _As...>
@@ -2000,8 +2000,16 @@ namespace std::execution {
           }, __as_);
       }
     };
+
+    struct __bind_back_t {
+      template <class _Fun, class... _As>
+      __binder_back<_Fun, _As...> operator()(_Fun __fun, _As&&... __as) const {
+        return {{}, (_Fun&&) __fun, {(_As&&) __as...}};
+      }
+    };
   } // namespace __closure
   using __closure::__binder_back;
+  inline constexpr __closure::__bind_back_t __bind_back {};
 
   namespace __tag_invoke_adaptors {
     // A derived-to-base cast that works even when the base is not
@@ -3545,7 +3553,7 @@ namespace std::execution {
   using run_loop = __loop::run_loop;
 
   /////////////////////////////////////////////////////////////////////////////
-  // [execution.senders.adaptors.schedule_from]
+  // [execution.senders.adaptors.unscoped_schedule_from]
   namespace __schedule_from {
     // Compute a variant type that is capable of storing the results of the
     // input sender when it completes. The variant has type:
@@ -3692,7 +3700,7 @@ namespace std::execution {
         void __complete() noexcept try {
           std::visit([&](auto&& __tupl) -> void {
             if constexpr (__decays_to<decltype(__tupl), monostate>) {
-              terminate(); // reaching this indicates a bug in schedule_from
+              terminate(); // reaching this indicates a bug in unscoped_schedule_from
             } else {
               std::apply([&](auto __tag, auto&&... __args) -> void {
                 __tag((_Receiver&&) __rcvr_, (decltype(__args)&&) __args...);
@@ -3704,13 +3712,13 @@ namespace std::execution {
         }
       };
 
-    struct schedule_from_t;
+    struct unscoped_schedule_from_t;
 
     template <class _SchedulerId, class _SenderId>
       struct __sender {
         using _Scheduler = __t<_SchedulerId>;
         using _Sender = __t<_SenderId>;
-        using descriptor_t = sender_descriptor_t<schedule_from_t(_Sender)>;
+        using descriptor_t = sender_descriptor_t<unscoped_schedule_from_t(_Sender)>;
         _Scheduler __sched_;
         _Sender __sndr_;
 
@@ -3735,7 +3743,7 @@ namespace std::execution {
           return ((_Tag&&) __tag)(__self.__sndr_, (_As&&) __as...);
         }
 
-        // So that connect will use schedule_from's scheduler argument to
+        // So that connect will use unscoped_schedule_from's scheduler argument to
         // control customization.
         template <same_as<get_domain_t> _Tag, same_as<__sender> _Self, class _Sched = _Scheduler>
             requires __valid1<domain_of_t, _Sched>
@@ -3759,7 +3767,7 @@ namespace std::execution {
                 __value_t>>;
       };
 
-    struct schedule_from_t {
+    struct unscoped_schedule_from_t {
       template <scheduler _Scheduler, sender _Sender>
         auto operator()(_Scheduler&& __sched, _Sender&& __sndr) const
           -> __sender<__x<decay_t<_Scheduler>>, __x<decay_t<_Sender>>> {
@@ -3767,15 +3775,15 @@ namespace std::execution {
         }
     };
   } // namespace __schedule_from
-  using __schedule_from::schedule_from_t;
-  inline constexpr schedule_from_t schedule_from{};
+  using __schedule_from::unscoped_schedule_from_t;
+  inline constexpr unscoped_schedule_from_t unscoped_schedule_from{};
 
   /////////////////////////////////////////////////////////////////////////////
-  // [execution.senders.adaptors.transfer]
+  // [execution.senders.adaptors.unscoped_transfer]
   namespace __transfer {
     template <class _Scheduler, class _Sender>
       using __schedule_from_result_t =
-        decltype(schedule_from(__declval<_Scheduler>(), __declval<_Sender>()));
+        decltype(unscoped_schedule_from(__declval<_Scheduler>(), __declval<_Sender>()));
 
     template <class _SenderId, class _SchedulerId>
       struct __sender;
@@ -3783,23 +3791,23 @@ namespace std::execution {
       __sender(_Sender, _Scheduler)
         -> __sender<__x<_Sender>, __x<_Scheduler>>;
 
-    struct transfer_t {
+    struct unscoped_transfer_t {
       template <sender _Sender, scheduler _Scheduler>
         auto operator()(_Sender&& __sndr, _Scheduler&& __sched) const {
           return __sender{(_Sender&&) __sndr, (_Scheduler&&) __sched};
         }
 
-      template <scheduler _Scheduler>
-        __binder_back<transfer_t, decay_t<_Scheduler>> operator()(_Scheduler&& __sched) const {
-          return {{}, {}, {(_Scheduler&&) __sched}};
-        }
+      // template <scheduler _Scheduler>
+      //   __binder_back<unscoped_transfer_t, decay_t<_Scheduler>> operator()(_Scheduler&& __sched) const {
+      //     return {{}, {}, {(_Scheduler&&) __sched}};
+      //   }
     };
 
     template <class _SenderId, class _SchedulerId>
       struct __sender {
         using _Sender = __t<_SenderId>;
         using _Scheduler = __t<_SchedulerId>;
-        using descriptor_t = sender_descriptor_t<transfer_t(_Sender)>;
+        using descriptor_t = sender_descriptor_t<unscoped_transfer_t(_Sender)>;
 
         _Sender __sndr_;
         _Scheduler __sched_;
@@ -3810,13 +3818,13 @@ namespace std::execution {
               __member_t<_Self, _Scheduler>,
               __member_t<_Self, _Sender>>;
 
-        // Fall back to calling schedule_from
+        // Fall back to calling unscoped_schedule_from
         template <__decays_to<__sender> _Self, receiver _Receiver>
             requires sender<_Self> && sender_to<__inner_t<_Self>, _Receiver>
           friend auto tag_invoke(connect_t, _Self&& __self, _Receiver&& __rcvr)
             -> connect_result_t<__inner_t<_Self>, _Receiver> {
             return connect(
-              schedule_from(((_Self&&) __self).__sched_, ((_Self&&) __self).__sndr_),
+              unscoped_schedule_from(((_Self&&) __self).__sched_, ((_Self&&) __self).__sndr_),
               (_Receiver&&) __rcvr);
           }
 
@@ -3840,8 +3848,9 @@ namespace std::execution {
           }
       };
   } // namespace __transfer
-  using __transfer::transfer_t;
-  inline constexpr transfer_t transfer{};
+
+  using __transfer::unscoped_transfer_t;
+  inline constexpr unscoped_transfer_t unscoped_transfer {};
 
   namespace __read {
     struct read_t;
@@ -4118,7 +4127,7 @@ namespace std::execution {
         template <class _Self, class _OldScheduler>
           static auto __call(_Self&& __self, _OldScheduler __old_sched) {
             return std::move(((_Self&&) __self).__sndr_)
-              | transfer(__old_sched)
+              | __bind_back(unscoped_transfer, __old_sched)
               | write(with(get_scheduler, __self.__sched_), (__with_domain)(__self.__sched_));
           }
 
@@ -4146,7 +4155,7 @@ namespace std::execution {
           static auto __call(_Self&& __self) {
             return let_value(
               read_with_default(get_scheduler, __self.__sched_)
-                | transfer(__self.__sched_),
+                | __bind_back(unscoped_transfer, __self.__sched_),
               __start_fn{__self.__sched_, ((_Self&&) __self).__sndr_});
           }
 
@@ -4199,10 +4208,10 @@ namespace std::execution {
         template <class _Self, class _OldScheduler>
           static auto __call(_Self&& __self, _OldScheduler __old_sched) {
             return ((_Self&&) __self).__sndr_
-              | transfer(__self.__sched_)
+              | __bind_back(unscoped_transfer, __self.__sched_)
               | write(with(get_scheduler, __old_sched), (__with_domain)(__old_sched))
               | ((_Self&&) __self).__closure_
-              | transfer(__old_sched)
+              | __bind_back(unscoped_transfer, __old_sched)
               | write(with(get_scheduler, __self.__sched_), (__with_domain)(__self.__sched_));
           }
 

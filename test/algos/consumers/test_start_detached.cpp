@@ -55,7 +55,7 @@ TEST_CASE("start_detached works with senders that do not complete immediately",
   impulse_scheduler sched;
   bool called{false};
   // Start the sender
-  ex::start_detached(ex::just() | ex::transfer(sched) | ex::then([&] { called = true; }));
+  ex::start_detached(ex::unscoped_transfer(ex::just(), sched) | ex::then([&] { called = true; }));
   // The `then` function is not yet called
   CHECK_FALSE(called);
   // After an impulse to the scheduler, the function would complete
@@ -68,9 +68,8 @@ TEST_CASE("start_detached works when changing threads", "[consumers][start_detac
   bool called{false};
   {
     // lunch some work on the thread pool
-    ex::sender auto snd = ex::just()
-                          | ex::transfer(pool.get_scheduler()) //
-                          | ex::then([&] { called = true; });
+    ex::sender auto snd = ex::unscoped_transfer(ex::just(), pool.get_scheduler()) //
+                        | ex::then([&] { called = true; });
     ex::start_detached(std::move(snd));
   }
   // wait for the work to be executed, with timeout

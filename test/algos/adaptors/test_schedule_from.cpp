@@ -29,28 +29,28 @@ namespace ex = std::execution;
 
 using namespace std::chrono_literals;
 
-TEST_CASE("schedule_from returns a sender", "[adaptors][schedule_from]") {
-  auto snd = ex::schedule_from(inline_scheduler{}, ex::just(13));
+TEST_CASE("unscoped_schedule_from returns a sender", "[adaptors][unscoped_schedule_from]") {
+  auto snd = ex::unscoped_schedule_from(inline_scheduler{}, ex::just(13));
   static_assert(ex::sender<decltype(snd)>);
   (void)snd;
 }
-TEST_CASE("schedule_from with environment returns a sender", "[adaptors][schedule_from]") {
-  auto snd = ex::schedule_from(inline_scheduler{}, ex::just(13));
+TEST_CASE("unscoped_schedule_from with environment returns a sender", "[adaptors][unscoped_schedule_from]") {
+  auto snd = ex::unscoped_schedule_from(inline_scheduler{}, ex::just(13));
   static_assert(ex::sender<decltype(snd), empty_env>);
   (void)snd;
 }
-TEST_CASE("schedule_from simple example", "[adaptors][schedule_from]") {
-  auto snd = ex::schedule_from(inline_scheduler{}, ex::just(13));
+TEST_CASE("unscoped_schedule_from simple example", "[adaptors][unscoped_schedule_from]") {
+  auto snd = ex::unscoped_schedule_from(inline_scheduler{}, ex::just(13));
   auto op = ex::connect(std::move(snd), expect_value_receiver{13});
   ex::start(op);
   // The receiver checks if we receive the right value
 }
 
 TEST_CASE(
-    "schedule_from calls the receiver when the scheduler dictates", "[adaptors][schedule_from]") {
+    "unscoped_schedule_from calls the receiver when the scheduler dictates", "[adaptors][unscoped_schedule_from]") {
   int recv_value{0};
   impulse_scheduler sched;
-  auto snd = ex::schedule_from(sched, ex::just(13));
+  auto snd = ex::unscoped_schedule_from(sched, ex::just(13));
   auto op = ex::connect(snd, expect_value_receiver_ex{&recv_value});
   ex::start(op);
   // Up until this point, the scheduler didn't start any task; no effect expected
@@ -61,8 +61,8 @@ TEST_CASE(
   CHECK(recv_value == 13);
 }
 
-TEST_CASE("schedule_from calls the given sender when the scheduler dictates",
-    "[adaptors][schedule_from]") {
+TEST_CASE("unscoped_schedule_from calls the given sender when the scheduler dictates",
+    "[adaptors][unscoped_schedule_from]") {
   bool called{false};
   auto snd_base = ex::just() | ex::then([&]() -> int {
     called = true;
@@ -71,7 +71,7 @@ TEST_CASE("schedule_from calls the given sender when the scheduler dictates",
 
   int recv_value{0};
   impulse_scheduler sched;
-  auto snd = ex::schedule_from(sched, std::move(snd_base));
+  auto snd = ex::unscoped_schedule_from(sched, std::move(snd_base));
   auto op = ex::connect(std::move(snd), expect_value_receiver_ex{&recv_value});
   ex::start(op);
   // The sender is started, even if the scheduler hasn't yet triggered
@@ -87,12 +87,12 @@ TEST_CASE("schedule_from calls the given sender when the scheduler dictates",
   CHECK(recv_value == 19);
 }
 
-TEST_CASE("schedule_from works when changing threads", "[adaptors][schedule_from]") {
+TEST_CASE("unscoped_schedule_from works when changing threads", "[adaptors][unscoped_schedule_from]") {
   example::static_thread_pool pool{2};
   bool called{false};
   {
     // lunch some work on the thread pool
-    ex::sender auto snd = ex::schedule_from(pool.get_scheduler(), ex::just()) //
+    ex::sender auto snd = ex::unscoped_schedule_from(pool.get_scheduler(), ex::just()) //
                           | ex::then([&] { called = true; });
     ex::start_detached(std::move(snd));
   }
@@ -115,94 +115,94 @@ struct non_default_constructible {
     }
 };
 
-TEST_CASE("schedule_from can accept non-default constructible types", "[adaptors][schedule_from]") {
-  auto snd = ex::schedule_from(inline_scheduler{}, ex::just(non_default_constructible{13}));
+TEST_CASE("unscoped_schedule_from can accept non-default constructible types", "[adaptors][unscoped_schedule_from]") {
+  auto snd = ex::unscoped_schedule_from(inline_scheduler{}, ex::just(non_default_constructible{13}));
   auto op = ex::connect(std::move(snd), expect_value_receiver{non_default_constructible{13}});
   ex::start(op);
   // The receiver checks if we receive the right value
 }
 
-TEST_CASE("schedule_from can be called with rvalue ref scheduler", "[adaptors][schedule_from]") {
-  auto snd = ex::schedule_from(inline_scheduler{}, ex::just(13));
+TEST_CASE("unscoped_schedule_from can be called with rvalue ref scheduler", "[adaptors][unscoped_schedule_from]") {
+  auto snd = ex::unscoped_schedule_from(inline_scheduler{}, ex::just(13));
   auto op = ex::connect(std::move(snd), expect_value_receiver{13});
   ex::start(op);
   // The receiver checks if we receive the right value
 }
-TEST_CASE("schedule_from can be called with const ref scheduler", "[adaptors][schedule_from]") {
+TEST_CASE("unscoped_schedule_from can be called with const ref scheduler", "[adaptors][unscoped_schedule_from]") {
   const inline_scheduler sched;
-  auto snd = ex::schedule_from(sched, ex::just(13));
+  auto snd = ex::unscoped_schedule_from(sched, ex::just(13));
   auto op = ex::connect(std::move(snd), expect_value_receiver{13});
   ex::start(op);
   // The receiver checks if we receive the right value
 }
-TEST_CASE("schedule_from can be called with ref scheduler", "[adaptors][schedule_from]") {
+TEST_CASE("unscoped_schedule_from can be called with ref scheduler", "[adaptors][unscoped_schedule_from]") {
   inline_scheduler sched;
-  auto snd = ex::schedule_from(sched, ex::just(13));
+  auto snd = ex::unscoped_schedule_from(sched, ex::just(13));
   auto op = ex::connect(std::move(snd), expect_value_receiver{13});
   ex::start(op);
   // The receiver checks if we receive the right value
 }
 
-TEST_CASE("schedule_from forwards set_error calls", "[adaptors][schedule_from]") {
+TEST_CASE("unscoped_schedule_from forwards set_error calls", "[adaptors][unscoped_schedule_from]") {
   error_scheduler<std::exception_ptr> sched{std::exception_ptr{}};
-  auto snd = ex::schedule_from(sched, ex::just(13));
+  auto snd = ex::unscoped_schedule_from(sched, ex::just(13));
   auto op = ex::connect(std::move(snd), expect_error_receiver{});
   ex::start(op);
   // The receiver checks if we receive an error
 }
-TEST_CASE("schedule_from forwards set_error calls of other types", "[adaptors][schedule_from]") {
+TEST_CASE("unscoped_schedule_from forwards set_error calls of other types", "[adaptors][unscoped_schedule_from]") {
   error_scheduler<std::string> sched{std::string{"error"}};
-  auto snd = ex::schedule_from(sched, ex::just(13));
+  auto snd = ex::unscoped_schedule_from(sched, ex::just(13));
   auto op = ex::connect(std::move(snd), expect_error_receiver{});
   ex::start(op);
   // The receiver checks if we receive an error
 }
-TEST_CASE("schedule_from forwards set_stopped calls", "[adaptors][schedule_from]") {
+TEST_CASE("unscoped_schedule_from forwards set_stopped calls", "[adaptors][unscoped_schedule_from]") {
   stopped_scheduler sched{};
-  auto snd = ex::schedule_from(sched, ex::just(13));
+  auto snd = ex::unscoped_schedule_from(sched, ex::just(13));
   auto op = ex::connect(std::move(snd), expect_stopped_receiver{});
   ex::start(op);
   // The receiver checks if we receive the stopped signal
 }
 
-TEST_CASE("schedule_from has the values_type corresponding to the given values",
-    "[adaptors][schedule_from]") {
+TEST_CASE("unscoped_schedule_from has the values_type corresponding to the given values",
+    "[adaptors][unscoped_schedule_from]") {
   inline_scheduler sched{};
 
-  check_val_types<type_array<type_array<int>>>(ex::schedule_from(sched, ex::just(1)));
-  check_val_types<type_array<type_array<int, double>>>(ex::schedule_from(sched, ex::just(3, 0.14)));
+  check_val_types<type_array<type_array<int>>>(ex::unscoped_schedule_from(sched, ex::just(1)));
+  check_val_types<type_array<type_array<int, double>>>(ex::unscoped_schedule_from(sched, ex::just(3, 0.14)));
   check_val_types<type_array<type_array<int, double, std::string>>>(
-      ex::schedule_from(sched, ex::just(3, 0.14, std::string{"pi"})));
+      ex::unscoped_schedule_from(sched, ex::just(3, 0.14, std::string{"pi"})));
 }
-TEST_CASE("schedule_from keeps error_types from scheduler's sender", "[adaptors][schedule_from]") {
+TEST_CASE("unscoped_schedule_from keeps error_types from scheduler's sender", "[adaptors][unscoped_schedule_from]") {
   inline_scheduler sched1{};
   error_scheduler sched2{};
   error_scheduler<int> sched3{43};
 
-  check_err_types<type_array<std::exception_ptr>>(ex::schedule_from(sched1, ex::just(1)));
-  check_err_types<type_array<std::exception_ptr>>(ex::schedule_from(sched2, ex::just(2)));
-  check_err_types<type_array<std::exception_ptr, int>>(ex::schedule_from(sched3, ex::just(3)));
+  check_err_types<type_array<std::exception_ptr>>(ex::unscoped_schedule_from(sched1, ex::just(1)));
+  check_err_types<type_array<std::exception_ptr>>(ex::unscoped_schedule_from(sched2, ex::just(2)));
+  check_err_types<type_array<std::exception_ptr, int>>(ex::unscoped_schedule_from(sched3, ex::just(3)));
 }
-TEST_CASE("schedule_from keeps sends_stopped from scheduler's sender", "[adaptors][schedule_from]") {
+TEST_CASE("unscoped_schedule_from keeps sends_stopped from scheduler's sender", "[adaptors][unscoped_schedule_from]") {
   inline_scheduler sched1{};
   error_scheduler sched2{};
   stopped_scheduler sched3{};
 
-  check_sends_stopped<false>(ex::schedule_from(sched1, ex::just(1)));
-  check_sends_stopped<true>(ex::schedule_from(sched2, ex::just(2)));
-  check_sends_stopped<true>(ex::schedule_from(sched3, ex::just(3)));
+  check_sends_stopped<false>(ex::unscoped_schedule_from(sched1, ex::just(1)));
+  check_sends_stopped<true>(ex::unscoped_schedule_from(sched2, ex::just(2)));
+  check_sends_stopped<true>(ex::unscoped_schedule_from(sched3, ex::just(3)));
 }
 
 namespace {
   namespace custom {
     struct domain {};
 
-    // Customization of schedule_from
+    // Customization of unscoped_schedule_from
     // Return a sender of a different value
     ex::sender_of<ex::no_env, std::string> auto tag_invoke(
       ex::connect_transform_t,
       custom::domain,
-      ex::schedule_from_t,
+      ex::unscoped_schedule_from_t,
       ex::sender_of<ex::no_env, std::string> auto&& sched_from,
       auto&& env) {
       // auto &&[sched, snd] = sched_from;
@@ -212,10 +212,10 @@ namespace {
 } // anonymous namespace
 using custom_inline_scheduler = basic_inline_scheduler<custom::domain>;
 
-TEST_CASE("schedule_from can be customized", "[adaptors][schedule_from]") {
+TEST_CASE("unscoped_schedule_from can be customized", "[adaptors][unscoped_schedule_from]") {
   // The customization will return a different value
   auto snd =
-      ex::schedule_from(custom_inline_scheduler{}, ex::just(std::string{"transfer"}))
+      ex::unscoped_schedule_from(custom_inline_scheduler{}, ex::just(std::string{"unscoped_transfer"}))
     | ex::complete_on(inline_scheduler{});
   auto op = ex::connect(std::move(snd), expect_value_receiver<std::string>("hijacked"));
   ex::start(op);

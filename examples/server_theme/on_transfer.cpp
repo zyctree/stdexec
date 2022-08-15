@@ -30,7 +30,7 @@
  *
  * Example goals:
  * - show how one can change the execution context
- * - exemplify the use of `on` and `transfer` algorithms
+ * - exemplify the use of `on` and `unscoped_transfer` algorithms
  */
 #if defined(__GNUC__) && !defined(__clang__)
 int main() { return 0; }

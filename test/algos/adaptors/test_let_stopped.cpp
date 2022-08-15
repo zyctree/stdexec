@@ -102,7 +102,7 @@ TEST_CASE("let_stopped function is not called on regular flow", "[adaptors][let_
 TEST_CASE("let_stopped function is not called on error flow", "[adaptors][let_stopped]") {
   bool called{false};
   error_scheduler<int> sched;
-  ex::sender auto snd = ex::just(13) | ex::transfer(sched) //
+  ex::sender auto snd = ex::unscoped_transfer(ex::just(13), sched) //
                         | ex::let_stopped([&] {
                             called = true;
                             return ex::just(0);
@@ -147,7 +147,7 @@ TEST_CASE("let_stopped has the error_type from the input sender if returning val
 }
 TEST_CASE("let_stopped adds to error_type of the input sender", "[adaptors][let_stopped]") {
   impulse_scheduler sched;
-  ex::sender auto in_snd = ex::just(11) | ex::transfer(sched);
+  ex::sender auto in_snd = ex::unscoped_transfer(ex::just(11), sched);
   check_err_types<type_array<std::exception_ptr, int>>( //
       in_snd                                //
       | ex::let_stopped([] { return ex::just_error(0); }));
@@ -160,7 +160,7 @@ TEST_CASE("let_stopped adds to error_type of the input sender", "[adaptors][let_
 }
 TEST_CASE("let_stopped can be used instead of stopped_as_error", "[adaptors][let_stopped]") {
   impulse_scheduler sched;
-  ex::sender auto in_snd = ex::just(11) | ex::transfer(sched);
+  ex::sender auto in_snd = ex::unscoped_transfer(ex::just(11), sched);
   check_val_types<type_array<type_array<int>>>(in_snd);
   check_err_types<type_array<std::exception_ptr>>(in_snd);
   check_sends_stopped<true>(in_snd);
@@ -179,24 +179,24 @@ TEST_CASE("let_stopped overrides sends_stopped from input sender", "[adaptors][l
 
   // Returning ex::just
   check_sends_stopped<false>(   //
-      ex::just() | ex::transfer(sched1) //
+      ex::unscoped_transfer(ex::just(), sched1) //
       | ex::let_stopped([] { return ex::just(); }));
   check_sends_stopped<false>(   //
-      ex::just() | ex::transfer(sched2) //
+      ex::unscoped_transfer(ex::just(), sched2) //
       | ex::let_stopped([] { return ex::just(); }));
   check_sends_stopped<false>(   //
-      ex::just() | ex::transfer(sched3) //
+      ex::unscoped_transfer(ex::just(), sched3) //
       | ex::let_stopped([] { return ex::just(); }));
 
   // Returning ex::just_stopped
   check_sends_stopped<false>(   //
-      ex::just() | ex::transfer(sched1) //
+      ex::unscoped_transfer(ex::just(), sched1) //
       | ex::let_stopped([] { return ex::just_stopped(); }));
   check_sends_stopped<true>(    //
-      ex::just() | ex::transfer(sched2) //
+      ex::unscoped_transfer(ex::just(), sched2) //
       | ex::let_stopped([] { return ex::just_stopped(); }));
   check_sends_stopped<true>(    //
-      ex::just() | ex::transfer(sched3) //
+      ex::unscoped_transfer(ex::just(), sched3) //
       | ex::let_stopped([] { return ex::just_stopped(); }));
 }
 

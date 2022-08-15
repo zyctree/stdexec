@@ -95,7 +95,7 @@ TEST_CASE("then can be used with just_stopped", "[adaptors][then]") {
 TEST_CASE("then function is not called on error", "[adaptors][then]") {
   bool called{false};
   error_scheduler sched;
-  ex::sender auto snd = ex::just(13) | ex::transfer(sched) //
+  ex::sender auto snd = ex::unscoped_transfer(ex::just(13), sched) //
                         | ex::then([&](int x) -> int {
                             called = true;
                             return x + 5;
@@ -107,7 +107,7 @@ TEST_CASE("then function is not called on error", "[adaptors][then]") {
 TEST_CASE("then function is not called when cancelled", "[adaptors][then]") {
   bool called{false};
   stopped_scheduler sched;
-  ex::sender auto snd = ex::just(13) | ex::transfer(sched) //
+  ex::sender auto snd = ex::unscoped_transfer(ex::just(13), sched) //
                         | ex::then([&](int x) -> int {
                             called = true;
                             return x + 5;
@@ -124,7 +124,7 @@ TEST_CASE("then advertises completion schedulers", "[adaptors][then]") {
     REQUIRE(ex::get_completion_scheduler<ex::set_value_t>(snd) == sched);
   }
   SECTION("for stop channel") {
-    ex::sender auto snd = ex::just_stopped() | ex::transfer(sched) | ex::then([]{});
+    ex::sender auto snd = ex::unscoped_transfer(ex::just_stopped(), sched) | ex::then([]{});
     REQUIRE(ex::get_completion_scheduler<ex::set_stopped_t>(snd) == sched);
   }
 }
@@ -141,11 +141,11 @@ TEST_CASE("then keeps error_types from input sender", "[adaptors][then]") {
   error_scheduler<int> sched3{43};
 
   check_err_types<type_array<std::exception_ptr>>( //
-      ex::just() | ex::transfer(sched1) | ex::then([]() noexcept {}));
+      ex::unscoped_transfer(ex::just(), sched1) | ex::then([]() noexcept {}));
   check_err_types<type_array<std::exception_ptr>>( //
-      ex::just() | ex::transfer(sched2) | ex::then([]() noexcept {}));
+      ex::unscoped_transfer(ex::just(), sched2) | ex::then([]() noexcept {}));
   check_err_types<type_array<std::exception_ptr, int>>( //
-      ex::just() | ex::transfer(sched3) | ex::then([] {}));
+      ex::unscoped_transfer(ex::just(), sched3) | ex::then([] {}));
 }
 TEST_CASE("then keeps sends_stopped from input sender", "[adaptors][then]") {
   inline_scheduler sched1{};
@@ -153,11 +153,11 @@ TEST_CASE("then keeps sends_stopped from input sender", "[adaptors][then]") {
   stopped_scheduler sched3{};
 
   check_sends_stopped<false>( //
-      ex::just() | ex::transfer(sched1) | ex::then([] {}));
+      ex::unscoped_transfer(ex::just(), sched1) | ex::then([] {}));
   check_sends_stopped<true>( //
-      ex::just() | ex::transfer(sched2) | ex::then([] {}));
+      ex::unscoped_transfer(ex::just(), sched2) | ex::then([] {}));
   check_sends_stopped<true>( //
-      ex::just() | ex::transfer(sched3) | ex::then([] {}));
+      ex::unscoped_transfer(ex::just(), sched3) | ex::then([] {}));
 }
 
 #endif

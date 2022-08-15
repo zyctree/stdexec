@@ -257,8 +257,9 @@ TEST_CASE("split is thread-safe", "[adaptors][split]") {
   std::mt19937_64 eng{std::random_device{}()};  // or seed however you want
   std::uniform_int_distribution<> dist{0, 1000};
 
-  auto split = ex::just(std::chrono::microseconds{dist(eng)}) |
-               ex::transfer(pool.get_scheduler()) | //
+  auto split = ex::unscoped_transfer(
+                 ex::just(std::chrono::microseconds{dist(eng)}),
+                 pool.get_scheduler()) | //
                ex::then([] (std::chrono::microseconds delay) {
                  std::this_thread::sleep_for(delay);
                  return 42;
@@ -281,8 +282,7 @@ TEST_CASE("split is thread-safe", "[adaptors][split]") {
 
       std::this_thread::sleep_for(delays[tid]);
       auto [val] = std::this_thread::sync_wait(
-          split |                   //
-          ex::transfer(scheduler) | //
+          ex::unscoped_transfer(split, scheduler) | //
           ex::then([](int v) { return v; })).value();
       thread_results[tid] = val;
     });
@@ -327,7 +327,7 @@ TEST_CASE("split can nest", "[adaptors][split]") {
 TEST_CASE("split doesn't advertise completion scheduler", "[adaptors][split]") {
   inline_scheduler sched;
 
-  auto snd = ex::just(42) | ex::transfer(sched) | ex::split();
+  auto snd = ex::unscoped_transfer(ex::just(42), sched) | ex::split();
   using snd_t = decltype(snd);
   static_assert(!ex::__has_completion_scheduler<snd_t, ex::set_value_t>);
   static_assert(!ex::__has_completion_scheduler<snd_t, ex::set_error_t>);
