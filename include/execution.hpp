@@ -106,9 +106,7 @@ namespace _P2300::execution {
 
           template <class... _Ts>
             friend auto tag_invoke(same_as<_Tag> auto, const __t& __self, _Ts&&...)
-              #if !_P2300_NVHPC()
               noexcept(std::is_nothrow_copy_constructible_v<std::unwrap_reference_t<_Value>>)
-              #endif
               -> std::unwrap_reference_t<_Value> {
               return __self.__value_;
             }
@@ -3023,12 +3021,8 @@ namespace _P2300::execution {
 
       template <class _Fun>
         struct __applyable_fn {
-          #if _P2300_NVHPC()
           template <class... _As>
             __ operator()(_As&&...) const;
-          #else
-            __ operator()(auto&&...) const;
-          #endif
           template <class... _As>
               requires invocable<_Fun, _As...>
             std::invoke_result_t<_Fun, _As...> operator()(_As&&...) const {
@@ -3057,11 +3051,8 @@ namespace _P2300::execution {
         struct __storage {
           #if _P2300_NVHPC()
           template <class... _As>
-            struct __op_state_for_ {
-              using __t = connect_result_t<__result_sender_t<_Fun, _As...>, _Receiver>;
-            };
-          template <class... _As>
-            using __op_state_for_t = __t<__op_state_for_<_As...>>;
+            using __op_state_for_t =
+              __minvoke2<__q2<connect_result_t>, __result_sender_t<_Fun, _As...>, _Receiver>;
           #else
           template <class... _As>
             using __op_state_for_t =
@@ -3119,13 +3110,8 @@ namespace _P2300::execution {
 
           #if _P2300_NVHPC()
           template <class... _As>
-            struct __op_state_for_ {
-              using __t =
-                connect_result_t<__result_sender_t<_Fun, _As...>, _Receiver>;
-            };
-          template <class... _As>
             using __op_state_for_t =
-              __t<__op_state_for_<_As...>>;
+              __minvoke2<__q2<connect_result_t>, __result_sender_t<_Fun, _As...>, _Receiver>;
           #else
           template <class... _As>
             using __op_state_for_t =
@@ -3673,7 +3659,9 @@ namespace _P2300::execution {
       using __variant_for_t =
         __minvoke<
           __minvoke<
-            __fold_right<__nullable_variant_t, __mbind_front_q2<__bind_completions_t, _Sender, _Env>>,
+            __fold_right<
+              __nullable_variant_t,
+              __mbind_front_q2<__bind_completions_t, _Sender, _Env>>,
             set_value_t,
             set_error_t,
             set_stopped_t>>;
