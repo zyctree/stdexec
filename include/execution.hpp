@@ -106,7 +106,9 @@ namespace _P2300::execution {
 
           template <class... _Ts>
             friend auto tag_invoke(same_as<_Tag> auto, const __t& __self, _Ts&&...)
+              #if !_P2300_NVHPC()
               noexcept(std::is_nothrow_copy_constructible_v<std::unwrap_reference_t<_Value>>)
+              #endif
               -> std::unwrap_reference_t<_Value> {
               return __self.__value_;
             }
