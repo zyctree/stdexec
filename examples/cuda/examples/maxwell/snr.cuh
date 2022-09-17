@@ -28,26 +28,74 @@ using example::cuda::is_on_gpu;
 
 namespace repeat_n_detail {
 
+  template <class OpT>
+    class receiver_t : stream::receiver_base_t {
+      using Sender = typename OpT::Sender;
+      using Receiver = typename OpT::Receiver;
+
+      OpT &op_state_;
+
+    public:
+      template <std::__one_of<ex::set_error_t, ex::set_stopped_t> _Tag, class... _Args _NVCXX_CAPTURE_PACK(_Args)>
+        friend void tag_invoke(_Tag __tag, receiver_t&& __self, _Args&&... __args) noexcept {
+          _NVCXX_EXPAND_PACK(_Args, __args,
+            OpT &op_state = __self.op_state_;
+            __tag((Receiver&&)op_state.receiver_, (_Args&&)__args...);
+          )
+        }
+
+      friend void tag_invoke(ex::set_value_t, receiver_t&& __self) noexcept {
+        using inner_op_state_t = ex::connect_result_t<Sender, receiver_t>;
+
+        OpT &op_state = __self.op_state_;
+
+        if (op_state.i_ == op_state.n_) {
+          if constexpr (std::is_base_of_v<stream::operation_state_base_t, inner_op_state_t>) {
+            cudaStream_t stream = op_state.inner_op_state_.stream_;
+            cudaStreamSynchronize(stream);
+          }
+          ex::set_value((Receiver&&)op_state.receiver_);
+          return;
+        }
+
+        op_state.i_++;
+        op_state.inner_op_state_.~inner_op_state_t();
+        new (&op_state.inner_op_state_) inner_op_state_t{ex::connect((Sender&&)op_state.sender_, receiver_t{op_state})};
+        ex::start(op_state.inner_op_state_);
+      }
+
+      friend auto tag_invoke(ex::get_env_t, const receiver_t& self)
+        -> ex::env_of_t<Receiver> {
+        return ex::get_env(self.op_state_.receiver_);
+      }
+
+      explicit receiver_t(OpT& op_state)
+        : op_state_(op_state)
+      {}
+    };
+
   template <class SenderId, class ReceiverId>
     struct operation_state_t {
       using Sender = std::__t<SenderId>;
       using Receiver = std::__t<ReceiverId>;
 
+      using inner_op_state_t = ex::connect_result_t<Sender, receiver_t<operation_state_t>>;
+
       Sender sender_;
       Receiver receiver_;
+      inner_op_state_t inner_op_state_;
       std::size_t n_{};
+      std::size_t i_{};
 
       friend void
       tag_invoke(std::execution::start_t, operation_state_t &self) noexcept {
-        for (std::size_t i = 0; i < self.n_; i++) {
-          std::this_thread::sync_wait((Sender&&)self.sender_);
-        }
-        ex::set_value((Receiver&&)self.receiver_);
+        ex::start(self.inner_op_state_);
       }
 
       operation_state_t(Sender&& sender, Receiver&& receiver, std::size_t n)
         : sender_{(Sender&&)sender}
         , receiver_{(Receiver&&)receiver}
+        , inner_op_state_(ex::connect((Sender&&)sender_, receiver_t<operation_state_t>{*this}))
         , n_(n)
       {}
     };
