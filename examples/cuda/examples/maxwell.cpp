@@ -69,6 +69,20 @@ int main(int argc, char *argv[]) {
     example::static_thread_pool pool{std::thread::hardware_concurrency()};
     run_snr_on("CPU (snr thread pool)", pool.get_scheduler());
   }
+
+  if (value(params, "run-cuda")) {
+    grid_t grid{N, true /* gpu */};
+
+    auto accessor = grid.accessor();
+    auto dt = calculate_dt(accessor.dx, accessor.dy);
+
+    run_cuda(dt, write_vtk, n_inner_iterations, n_outer_iterations, grid, "CPU (cuda)");
+
+    if (write_results) {
+      store_results(accessor);
+    }
+  }
+
   if (value(params, "run-stream-scheduler")) {
     run_snr_on("GPU (snr cuda stream)", stream::scheduler_t{});
   }
@@ -94,19 +108,6 @@ int main(int argc, char *argv[]) {
     auto dt = calculate_dt(accessor.dx, accessor.dy);
 
     run_cpp(dt, write_vtk, n_inner_iterations, n_outer_iterations, grid, "CPU (cpp)");
-
-    if (write_results) {
-      store_results(accessor);
-    }
-  }
-
-  if (value(params, "run-cuda")) {
-    grid_t grid{N, true /* gpu */};
-
-    auto accessor = grid.accessor();
-    auto dt = calculate_dt(accessor.dx, accessor.dy);
-
-    run_cuda(dt, write_vtk, n_inner_iterations, n_outer_iterations, grid, "CPU (cuda)");
 
     if (write_results) {
       store_results(accessor);
