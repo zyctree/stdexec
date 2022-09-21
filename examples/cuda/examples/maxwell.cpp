@@ -16,6 +16,7 @@
 
 #include "maxwell/snr.cuh"
 #include "maxwell/std.cuh"
+#include "maxwell/stdpar.cuh"
 #include "maxwell/cpp.cuh"
 #include "maxwell/cuda.cuh"
 
@@ -28,6 +29,7 @@ int main(int argc, char *argv[]) {
               << "\t--write-results\n"
               << "\t--inner-iterations\n"
               << "\t--run-std\n"
+              << "\t--run-stdpar\n"
               << "\t--run-cpp\n"
               << "\t--run-cuda\n"
               << "\t--run-inline-scheduler\n"
@@ -76,7 +78,7 @@ int main(int argc, char *argv[]) {
     auto accessor = grid.accessor();
     auto dt = calculate_dt(accessor.dx, accessor.dy);
 
-    run_cuda(dt, write_vtk, n_inner_iterations, n_outer_iterations, grid, "CPU (cuda)");
+    run_cuda(dt, write_vtk, n_inner_iterations, n_outer_iterations, grid, "GPU (cuda)");
 
     if (write_results) {
       store_results(accessor);
@@ -100,6 +102,23 @@ int main(int argc, char *argv[]) {
       store_results(accessor);
     }
   }
+
+  #ifdef _NVHPC_CUDA
+  if (value(params, "run-stdpar")) {
+    const bool gpu = is_gpu_policy(std::execution::par_unseq);
+    std::string_view method = gpu ? "GPU (stdpar)" : "CPU (stdpar)";
+    grid_t grid{N, gpu};
+
+    auto accessor = grid.accessor();
+    auto dt = calculate_dt(accessor.dx, accessor.dy);
+
+    run_stdpar(dt, write_vtk, n_inner_iterations, n_outer_iterations, grid, std::execution::par_unseq, method);
+
+    if (write_results) {
+      store_results(accessor);
+    }
+  }
+  #endif
 
   if (value(params, "run-cpp")) {
     grid_t grid{N, false /* !gpu */};
