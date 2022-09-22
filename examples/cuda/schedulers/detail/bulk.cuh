@@ -23,57 +23,60 @@
 namespace example::cuda::stream {
 
 namespace bulk {
+  template <int BlockThreads, std::integral Shape, class Fun, class... As>
+    __launch_bounds__(BlockThreads) 
+    __global__ void kernel(Shape shape, Fun fn, As... as) {
+      const int tid = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
 
-template <int BlockThreads, std::integral Shape, class Fun, class... As>
-  __launch_bounds__(BlockThreads) 
-  __global__ void kernel(Shape shape, Fun fn, As... as) {
-    const int tid = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
-
-    if (tid < static_cast<int>(shape)) {
-      fn(tid, as...);
+      if (tid < static_cast<int>(shape)) {
+        fn(tid, as...);
+      }
     }
-  }
 
-template <class ReceiverId, std::integral Shape, class Fun>
-  class receiver_t
-    : std::execution::receiver_adaptor<receiver_t<ReceiverId, Shape, Fun>, std::__t<ReceiverId>>
-    , receiver_base_t {
-    using Receiver = std::__t<ReceiverId>;
-    friend std::execution::receiver_adaptor<receiver_t, Receiver>;
+  template <class ReceiverId, std::integral Shape, class Fun>
+    class receiver_t : receiver_base_t {
+      using Receiver = std::__t<ReceiverId>;
 
-    Shape shape_;
-    Fun f_;
+      Shape shape_;
+      Fun f_;
 
-    operation_state_base_t& op_state_;
+      operation_state_base_t<ReceiverId>& op_state_;
 
-    template <class... As>
-    void set_value(As&&... as) && noexcept 
-      requires std::__callable<Fun, Shape, std::decay_t<As>...> {
+    public:
+      template <class... As _NVCXX_CAPTURE_PACK(As)>
+        friend void tag_invoke(std::execution::set_value_t, receiver_t&& self, As&&... as) 
+          noexcept requires std::__callable<Fun, Shape, std::decay_t<As>...> {
+          _NVCXX_EXPAND_PACK(As, as,
+            constexpr int block_threads = 256;
+            const int grid_blocks = (static_cast<int>(self.shape_) + block_threads - 1) / block_threads;
+            kernel<block_threads, Shape, Fun, std::decay_t<As>...>
+                    <<<grid_blocks, block_threads, 0, self.op_state_.stream_>>>(
+                      self.shape_, self.f_, as...);
 
-      constexpr int block_threads = 256;
-      const int grid_blocks = (static_cast<int>(shape_) + block_threads - 1) / block_threads;
-      kernel<block_threads, Shape, Fun, std::decay_t<As>...><<<grid_blocks, block_threads, 0, op_state_.stream_>>>(shape_, f_, as...);
+            self.op_state_.propagate_completion_signal(std::execution::set_value, (As&&)as...);
+          );
+        }
 
-      if constexpr (!std::is_base_of_v<receiver_base_t, Receiver>) {
-        cudaStreamSynchronize(op_state_.stream_);
+      template <std::__one_of<std::execution::set_error_t, 
+                              std::execution::set_stopped_t> Tag, class... As>
+        friend void tag_invoke(Tag tag, receiver_t&& self, As&&... as) noexcept {
+          self.op_state_.propagate_completion_signal(tag, (As&&)as...);
+        }
+
+      friend std::execution::env_of_t<Receiver> tag_invoke(std::execution::get_env_t, const receiver_t& self) {
+        return std::execution::get_env(self.op_state_.receiver_);
       }
 
-      std::execution::set_value(std::move(this->base()), (As&&)as...);
-    }
-
-   public:
-    explicit receiver_t(Receiver rcvr, Shape shape, Fun fun, operation_state_base_t& op_state)
-      : std::execution::receiver_adaptor<receiver_t, Receiver>((Receiver&&) rcvr)
-      , shape_(shape)
-      , f_((Fun&&) fun)
-      , op_state_(op_state)
-    {}
-  };
-
+      explicit receiver_t(Shape shape, Fun fun, operation_state_base_t<ReceiverId>& op_state)
+        : shape_(shape)
+        , f_((Fun&&) fun)
+        , op_state_(op_state)
+      {}
+    };
 }
 
 template <class SenderId, std::integral Shape, class FunId>
-  struct bulk_sender_t {
+  struct bulk_sender_t : sender_base_t {
     using Sender = std::__t<SenderId>;
     using Fun = std::__t<FunId>;
 
@@ -104,10 +107,13 @@ template <class SenderId, std::integral Shape, class FunId>
     template <std::__decays_to<bulk_sender_t> Self, std::execution::receiver Receiver>
       requires std::execution::receiver_of<Receiver, completion_signatures<Self, std::execution::env_of_t<Receiver>>>
     friend auto tag_invoke(std::execution::connect_t, Self&& self, Receiver&& rcvr)
-      -> stream_op_state_t<std::__member_t<Self, Sender>, receiver_t<Receiver>> {
-        return stream_op_state<std::__member_t<Self, Sender>>(((Self&&)self).sndr_, [&](operation_state_base_t& stream_provider) -> receiver_t<Receiver> {
-          return receiver_t<Receiver>((Receiver&&)rcvr, self.shape_, self.fun_, stream_provider);
-        });
+      -> stream_op_state_t<std::__member_t<Self, Sender>, receiver_t<Receiver>, Receiver> {
+        return stream_op_state<std::__member_t<Self, Sender>>(
+            ((Self&&)self).sndr_, 
+            (Receiver&&)rcvr,
+            [&](operation_state_base_t<std::__x<Receiver>>& stream_provider) -> receiver_t<Receiver> {
+              return receiver_t<Receiver>(self.shape_, self.fun_, stream_provider);
+            });
       }
 
     template <std::__decays_to<bulk_sender_t> Self, class Env>

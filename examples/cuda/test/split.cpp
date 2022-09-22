@@ -10,13 +10,16 @@ namespace stream = example::cuda::stream;
 using example::cuda::is_on_gpu;
 
 TEST_CASE("split returns a sender", "[cuda][stream][adaptors][split]") {
-  auto snd = ex::split(ex::schedule(stream::scheduler_t{}));
+  stream::context_t stream_context{};
+  auto snd = ex::split(ex::schedule(stream_context.get_scheduler()));
   STATIC_REQUIRE(ex::sender<decltype(snd)>);
   (void)snd;
 }
 
 TEST_CASE("split works", "[cuda][stream][adaptors][split]") {
-  auto fork = ex::schedule(stream::scheduler_t{}) //
+  stream::context_t stream_context{};
+
+  auto fork = ex::schedule(stream_context.get_scheduler()) //
             | ex::then([=] {
                 return is_on_gpu(); 
               })

@@ -11,16 +11,19 @@ namespace stream = example::cuda::stream;
 using example::cuda::is_on_gpu;
 
 TEST_CASE("let_value returns a sender", "[cuda][stream][adaptors][let_value]") {
-  auto snd = ex::let_value(ex::schedule(stream::scheduler_t{}), [] { return ex::just(); });
+  stream::context_t stream_context{};
+  auto snd = ex::let_value(ex::schedule(stream_context.get_scheduler()), [] { return ex::just(); });
   STATIC_REQUIRE(ex::sender<decltype(snd)>);
   (void)snd;
 }
 
 TEST_CASE("let_value executes on GPU", "[cuda][stream][adaptors][let_value]") {
+  stream::context_t stream_context{};
+
   flags_storage_t flags_storage{};
   auto flags = flags_storage.get();
 
-  auto snd = ex::schedule(stream::scheduler_t{}) //
+  auto snd = ex::schedule(stream_context.get_scheduler()) //
            | ex::let_value([=] {
                if (is_on_gpu()) {
                  flags.set();
@@ -33,10 +36,12 @@ TEST_CASE("let_value executes on GPU", "[cuda][stream][adaptors][let_value]") {
 }
 
 TEST_CASE("let_value accepts values on GPU", "[cuda][stream][adaptors][let_value]") {
+  stream::context_t stream_context{};
+
   flags_storage_t flags_storage{};
   auto flags = flags_storage.get();
 
-  auto snd = ex::schedule(stream::scheduler_t{}) //
+  auto snd = ex::schedule(stream_context.get_scheduler()) //
            | ex::then([]() -> int { return 42; })
            | ex::let_value([=](int val) {
                if (is_on_gpu()) {
@@ -52,10 +57,12 @@ TEST_CASE("let_value accepts values on GPU", "[cuda][stream][adaptors][let_value
 }
 
 TEST_CASE("let_value accepts multiple values on GPU", "[cuda][stream][adaptors][let_value]") {
+  stream::context_t stream_context{};
+
   flags_storage_t flags_storage{};
   auto flags = flags_storage.get();
 
-  auto snd = ex::transfer_just(stream::scheduler_t{}, 42, 4.2) //
+  auto snd = ex::transfer_just(stream_context.get_scheduler(), 42, 4.2) //
            | ex::let_value([=](int i, double d) {
                if (is_on_gpu()) {
                  if (i == 42 && d == 4.2) {
@@ -70,7 +77,9 @@ TEST_CASE("let_value accepts multiple values on GPU", "[cuda][stream][adaptors][
 }
 
 TEST_CASE("let_value returns values on GPU", "[cuda][stream][adaptors][let_value]") {
-  auto snd = ex::schedule(stream::scheduler_t{}) //
+  stream::context_t stream_context{};
+
+  auto snd = ex::schedule(stream_context.get_scheduler()) //
            | ex::let_value([=]() {
                return ex::just(is_on_gpu());
              });

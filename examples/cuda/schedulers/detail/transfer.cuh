@@ -18,54 +18,72 @@
 #include <execution.hpp>
 #include <type_traits>
 
-#include <thrust/device_vector.h>
-
 #include "common.cuh"
 
 namespace example::cuda::stream {
 
 namespace transfer {
 
-template <class ReceiverId>
-  class receiver_t
-    : std::execution::receiver_adaptor<receiver_t<ReceiverId>, std::__t<ReceiverId>>
-    , receiver_base_t {
+  template <class ReceiverId>
+  struct sink_receiver_t : receiver_base_t {
     using Receiver = std::__t<ReceiverId>;
-    friend std::execution::receiver_adaptor<receiver_t, Receiver>;
+    Receiver receiver_;
 
-    operation_state_base_t &op_state_;
+    template <class Tag, class... As _NVCXX_CAPTURE_PACK(As)> 
+      friend void tag_invoke(Tag, sink_receiver_t&& __rcvr, As&&... as) noexcept {
+        _NVCXX_EXPAND_PACK(As, as,
 
-    template <class... As>
-    void set_value(As&&... as) && noexcept {
-      // TODO Properly exit the GPU context
-      std::execution::set_value(std::move(this->base()), (As&&)as...);
+        );
+      }
+
+    friend std::execution::env_of_t<Receiver> tag_invoke(std::execution::get_env_t, const sink_receiver_t& self) noexcept { 
+      return std::execution::get_env(self.receiver_); 
     }
-
-   public:
-    explicit receiver_t(Receiver rcvr, operation_state_base_t &op_state)
-      : std::execution::receiver_adaptor<receiver_t, Receiver>((Receiver&&) rcvr)
-      , op_state_(op_state)
-    {}
   };
 
+  template <class ReceiverId>
+    struct bypass_receiver_t : receiver_base_t {
+      operation_state_base_t<ReceiverId>& operation_state_;
+
+      template <std::__one_of<std::execution::set_value_t, 
+                              std::execution::set_error_t, 
+                              std::execution::set_stopped_t> Tag,
+                class... As _NVCXX_CAPTURE_PACK(As)>
+      friend void tag_invoke(Tag tag, bypass_receiver_t&& self, As&&... as) noexcept {
+        _NVCXX_EXPAND_PACK(As, as,
+          cudaStreamSynchronize(self.operation_state_.stream_);
+          tag(std::move(self.operation_state_.receiver_.receiver_), (As&&)as...);
+        );
+      }
+
+      friend std::execution::env_of_t<typename std::__t<ReceiverId>::Receiver> 
+      tag_invoke(std::execution::get_env_t, const bypass_receiver_t& self) {
+        return std::execution::get_env(self.operation_state_.receiver_.receiver_);
+      }
+    };
 }
 
 template <class SenderId>
-  struct transfer_sender_t {
+  struct transfer_sender_t : sender_base_t {
     using Sender = std::__t<SenderId>;
 
+    detail::queue::task_hub_t* hub_;
     Sender sndr_;
 
     template <class Receiver>
-      using receiver_t = transfer::receiver_t<std::__x<Receiver>>;
+      using receiver_t = transfer::bypass_receiver_t<std::__x<transfer::sink_receiver_t<std::__x<Receiver>>>>;
 
     template <std::__decays_to<transfer_sender_t> Self, std::execution::receiver Receiver>
       requires std::execution::sender_to<std::__member_t<Self, Sender>, Receiver>
     friend auto tag_invoke(std::execution::connect_t, Self&& self, Receiver&& rcvr)
-      -> stream_op_state_t<std::__member_t<Self, Sender>, receiver_t<Receiver>> {
-        return stream_op_state<std::__member_t<Self, Sender>>(((Self&&)self).sndr_, [&](operation_state_base_t& stream_provider) -> receiver_t<Receiver> {
-          return receiver_t<Receiver>((Receiver&&)rcvr, stream_provider);
-        });
+      -> stream_op_state_t<std::__member_t<Self, Sender>, receiver_t<Receiver>, transfer::sink_receiver_t<std::__x<Receiver>>> {
+        return stream_op_state<std::__member_t<Self, Sender>>(
+          self.hub_,
+          ((Self&&)self).sndr_, 
+          transfer::sink_receiver_t<std::__x<Receiver>>{{}, (Receiver&&)rcvr},
+          [&](operation_state_base_t<std::__x<transfer::sink_receiver_t<std::__x<Receiver>>>>& stream_provider) -> receiver_t<Receiver> {
+            return receiver_t<Receiver>{{}, stream_provider};
+          });
     }
 
     template <std::__decays_to<transfer_sender_t> Self, class Env>
@@ -84,6 +102,11 @@ template <class SenderId>
       noexcept(std::__nothrow_callable<Tag, const Sender&, As...>)
       -> std::__call_result_if_t<std::execution::tag_category<Tag, std::execution::forwarding_sender_query>, Tag, const Sender&, As...> {
       return ((Tag&&) tag)(self.sndr_, (As&&) as...);
+    }
+
+    transfer_sender_t(detail::queue::task_hub_t* hub, Sender sndr)
+      : hub_(hub)
+      , sndr_{(Sender&&)sndr} {
     }
   };
 

@@ -10,16 +10,19 @@ namespace stream = example::cuda::stream;
 using example::cuda::is_on_gpu;
 
 TEST_CASE("then returns a sender", "[cuda][stream][adaptors][then]") {
-  auto snd = ex::then(ex::schedule(stream::scheduler_t{}), [] {});
+  stream::context_t stream_context{};
+  auto snd = ex::then(ex::schedule(stream_context.get_scheduler()), [] {});
   STATIC_REQUIRE(ex::sender<decltype(snd)>);
   (void)snd;
 }
 
 TEST_CASE("then executes on GPU", "[cuda][stream][adaptors][then]") {
+  stream::context_t stream_context{};
+
   flags_storage_t flags_storage{};
   auto flags = flags_storage.get();
 
-  auto snd = ex::schedule(stream::scheduler_t{}) //
+  auto snd = ex::schedule(stream_context.get_scheduler()) //
            | ex::then([=] {
                if (is_on_gpu()) {
                  flags.set();
@@ -31,10 +34,12 @@ TEST_CASE("then executes on GPU", "[cuda][stream][adaptors][then]") {
 }
 
 TEST_CASE("then accepts values on GPU", "[cuda][stream][adaptors][then]") {
+  stream::context_t stream_context{};
+
   flags_storage_t flags_storage{};
   auto flags = flags_storage.get();
 
-  auto snd = ex::transfer_just(stream::scheduler_t{}, 42) //
+  auto snd = ex::transfer_just(stream_context.get_scheduler(), 42) //
            | ex::then([=](int val) {
                if (is_on_gpu()) {
                  if (val == 42) {
@@ -48,10 +53,12 @@ TEST_CASE("then accepts values on GPU", "[cuda][stream][adaptors][then]") {
 }
 
 TEST_CASE("then accepts multiple values on GPU", "[cuda][stream][adaptors][then]") {
+  stream::context_t stream_context{};
+
   flags_storage_t flags_storage{};
   auto flags = flags_storage.get();
 
-  auto snd = ex::transfer_just(stream::scheduler_t{}, 42, 4.2) //
+  auto snd = ex::transfer_just(stream_context.get_scheduler(), 42, 4.2) //
            | ex::then([=](int i, double d) {
                if (is_on_gpu()) {
                  if (i == 42 && d == 4.2) {
@@ -65,7 +72,9 @@ TEST_CASE("then accepts multiple values on GPU", "[cuda][stream][adaptors][then]
 }
 
 TEST_CASE("then returns values on GPU", "[cuda][stream][adaptors][then]") {
-  auto snd = ex::schedule(stream::scheduler_t{}) //
+  stream::context_t stream_context{};
+
+  auto snd = ex::schedule(stream_context.get_scheduler()) //
            | ex::then([=]() -> int {
                if (is_on_gpu()) {
                  return 42;

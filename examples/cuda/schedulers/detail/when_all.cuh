@@ -199,7 +199,7 @@ template <class... SenderIds>
 
         template <class OpT>
         static void sync(OpT& op) noexcept {
-          if constexpr (std::is_base_of_v<operation_state_base_t, OpT>) {
+          if constexpr (std::is_base_of_v<detail::op_state_base_t, OpT>) {
             if (op.stream_) {
               cudaStreamSynchronize(op.stream_);
             }

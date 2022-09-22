@@ -86,7 +86,8 @@ int main(int argc, char *argv[]) {
   }
 
   if (value(params, "run-stream-scheduler")) {
-    run_snr_on("GPU (snr cuda stream)", stream::scheduler_t{});
+    stream::context_t stream_context{};
+    run_snr_on("GPU (snr cuda stream)", stream_context.get_scheduler());
   }
 
   // Naive

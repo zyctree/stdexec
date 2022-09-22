@@ -18,8 +18,6 @@
 #include <execution.hpp>
 #include <type_traits>
 
-#include <thrust/device_vector.h>
-
 #include "common.cuh"
 
 namespace example::cuda::stream {
@@ -39,46 +37,51 @@ template <class Fun, class ResultT, class... As>
   }
 
 template <class ReceiverId, class Fun>
-  class receiver_t
-    : std::execution::receiver_adaptor<receiver_t<ReceiverId, Fun>, std::__t<ReceiverId>>
-    , receiver_base_t {
+  class receiver_t : receiver_base_t {
     using Receiver = std::__t<ReceiverId>;
-    friend std::execution::receiver_adaptor<receiver_t, Receiver>;
 
     Fun f_;
-    operation_state_base_t &op_state_;
-
-    template <class... As>
-    void set_value(As&&... as) && noexcept 
-      requires std::__callable<Fun, std::decay_t<As>...> {
-      using result_t = std::decay_t<std::invoke_result_t<Fun, std::decay_t<As>...>>;
-
-      cudaStream_t stream = op_state_.stream_;
-
-      if constexpr (std::is_same_v<void, result_t>) {
-        kernel<Fun, std::decay_t<As>...><<<1, 1, 0, stream>>>(f_, as...);
-
-        if constexpr (!std::is_base_of_v<receiver_base_t, Receiver>) {
-          cudaStreamSynchronize(stream);
-        }
-
-        std::execution::set_value(std::move(this->base()));
-      } else {
-        result_t *d_result{};
-        cudaMallocAsync(&d_result, sizeof(result_t), stream);
-        kernel_with_result<Fun, std::decay_t<As>...><<<1, 1, 0, stream>>>(f_, d_result, as...);
-
-        result_t h_result;
-        cudaMemcpy(&h_result, d_result, sizeof(result_t), cudaMemcpyDeviceToHost);
-        std::execution::set_value(std::move(this->base()), h_result);
-        cudaFreeAsync(d_result, stream);
-      }
-    }
+    operation_state_base_t<ReceiverId> &op_state_;
 
    public:
-    explicit receiver_t(Receiver rcvr, Fun fun, operation_state_base_t &op_state)
-      : std::execution::receiver_adaptor<receiver_t, Receiver>((Receiver&&) rcvr)
-      , f_((Fun&&) fun)
+
+    template <class... As _NVCXX_CAPTURE_PACK(As)>
+    friend void tag_invoke(std::execution::set_value_t, receiver_t&& self, As&&... as) 
+      noexcept requires std::__callable<Fun, As...> {
+      _NVCXX_EXPAND_PACK(As, as,
+        using result_t = std::decay_t<std::invoke_result_t<Fun, std::decay_t<As>...>>;
+
+        cudaStream_t stream = self.op_state_.stream_;
+
+        if constexpr (std::is_same_v<void, result_t>) {
+          kernel<Fun, std::decay_t<As>...><<<1, 1, 0, stream>>>(self.f_, as...);
+          self.op_state_.propagate_completion_signal(std::execution::set_value);
+        } else {
+          result_t *d_result{};
+          cudaMallocAsync(&d_result, sizeof(result_t), stream);
+          kernel_with_result<Fun, std::decay_t<As>...><<<1, 1, 0, stream>>>(self.f_, d_result, as...);
+
+          // TODO References in completion signature 
+          result_t h_result;
+          cudaMemcpy(&h_result, d_result, sizeof(result_t), cudaMemcpyDeviceToHost);
+          self.op_state_.propagate_completion_signal(std::execution::set_value, h_result);
+          cudaFreeAsync(d_result, stream);
+        }
+      );
+    }
+
+    template <std::__one_of<std::execution::set_error_t, 
+                            std::execution::set_stopped_t> Tag, class... As>
+    friend void tag_invoke(Tag tag, receiver_t&& self, As&&... as) noexcept {
+      self.op_state_.propagate_completion_signal(tag, (As&&)as...);
+    }
+
+    friend std::execution::env_of_t<Receiver> tag_invoke(std::execution::get_env_t, const receiver_t& self) {
+      return std::execution::get_env(self.op_state_.receiver_);
+    }
+
+    explicit receiver_t(Fun fun, operation_state_base_t<ReceiverId> &op_state)
+      : f_((Fun&&) fun)
       , op_state_(op_state)
     {}
   };
@@ -86,7 +89,7 @@ template <class ReceiverId, class Fun>
 }
 
 template <class SenderId, class FunId>
-  struct then_sender_t {
+  struct then_sender_t : sender_base_t {
     using Sender = std::__t<SenderId>;
     using Fun = std::__t<FunId>;
 
@@ -115,10 +118,13 @@ template <class SenderId, class FunId>
     template <std::__decays_to<then_sender_t> Self, std::execution::receiver Receiver>
       requires std::execution::receiver_of<Receiver, completion_signatures<Self, std::execution::env_of_t<Receiver>>>
     friend auto tag_invoke(std::execution::connect_t, Self&& self, Receiver&& rcvr)
-      -> stream_op_state_t<std::__member_t<Self, Sender>, receiver_t<Receiver>> {
-        return stream_op_state<std::__member_t<Self, Sender>>(((Self&&)self).sndr_, [&](operation_state_base_t& stream_provider) -> receiver_t<Receiver> {
-          return receiver_t<Receiver>((Receiver&&)rcvr, self.fun_, stream_provider);
-        });
+      -> stream_op_state_t<std::__member_t<Self, Sender>, receiver_t<Receiver>, Receiver> {
+        return stream_op_state<std::__member_t<Self, Sender>>(
+          ((Self&&)self).sndr_, 
+          (Receiver&&)rcvr,
+          [&](operation_state_base_t<std::__x<Receiver>>& stream_provider) -> receiver_t<Receiver> {
+            return receiver_t<Receiver>(self.fun_, stream_provider);
+          });
     }
 
     template <std::__decays_to<then_sender_t> Self, class Env>

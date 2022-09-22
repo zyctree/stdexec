@@ -18,8 +18,6 @@
 #include <execution.hpp>
 #include <type_traits>
 
-#include <thrust/device_vector.h>
-
 #include "common.cuh"
 
 namespace _P2300::execution {
@@ -104,7 +102,10 @@ namespace _P2300::execution {
         struct __storage {
           template <class... _As>
             struct __op_state_for_ {
-              using __t = connect_result_t<__result_sender_t<_Fun, _As...>, _Receiver>;
+              using __t = 
+                connect_result_t<
+                  __result_sender_t<_Fun, _As...>, 
+                  example::cuda::stream::propagate_receiver_t<std::__x<_Receiver>>>;
             };
           template <class... _As>
             using __op_state_for_t = __t<__op_state_for_<_As...>>;
@@ -160,13 +161,11 @@ namespace _P2300::execution {
         struct __operation;
 
       template <class _SenderId, class _ReceiverId, class _FunId, class _Let>
-        struct __receiver {
+        struct __receiver : example::cuda::stream::receiver_base_t {
           using _Sender = __t<_SenderId>;
           using _Receiver = __t<_ReceiverId>;
           using _Fun = __t<_FunId>;
           using _Env = env_of_t<_Receiver>;
-          _Receiver&& base() && noexcept { return (_Receiver&&) __op_state_->__rcvr_;}
-          const _Receiver& base() const & noexcept { return __op_state_->__rcvr_;}
 
           template <class... _As>
             using __which_tuple_t =
@@ -174,7 +173,7 @@ namespace _P2300::execution {
 
           template <class... _As>
             using __op_state_for_t =
-              __minvoke2<__q2<connect_result_t>, __result_sender_t<_Fun, _As...>, _Receiver>;
+              __minvoke2<__q2<connect_result_t>, __result_sender_t<_Fun, _As...>, example::cuda::stream::propagate_receiver_t<_ReceiverId>>;
 
           // handle the case when let_error is used with an input sender that
           // never completes with set_error(exception_ptr)
@@ -182,7 +181,7 @@ namespace _P2300::execution {
               requires same_as<_Let, set_error_t> &&
                 (!__v<__error_types_of_t<_Sender, _Env, __transform<__q1<decay_t>, __contains<std::exception_ptr>>>>)
             friend void tag_invoke(set_error_t, __receiver&& __self, _Error&& __err) noexcept {
-              set_error(std::move(__self).base(), (_Error&&) __err);
+              __self.__op_state_->propagate_completion_signal(set_error, (_Error&&) __err);
             }
 
           template <__one_of<_Let> _Tag, class... _As _NVCXX_CAPTURE_PACK(_As)>
@@ -205,27 +204,32 @@ namespace _P2300::execution {
                   __self.__op_state_->__storage_.__args_.template emplace<__tuple_t>((_As&&) __as...);
                 auto& __op = __self.__op_state_->__storage_.__op_state3_.template emplace<__op_state_t>(
                   __conv{[&] {
-                    return connect(*result_sender, std::move(__self).base());
+                    return connect(
+                        *result_sender, 
+                        example::cuda::stream::propagate_receiver_t<_ReceiverId>{
+                          {}, 
+                          static_cast<example::cuda::stream::operation_state_base_t<_ReceiverId>&>(
+                              *__self.__op_state_)});
                   }}
                 );
                 start(__op);
               )
             } catch(...) {
-              set_error(std::move(__self).base(), std::current_exception());
+              __self.__op_state_->propagate_completion_signal(set_error, std::current_exception());
             }
 
           template <__one_of<set_value_t, set_error_t, set_stopped_t> _Tag, class... _As _NVCXX_CAPTURE_PACK(_As)>
               requires __none_of<_Tag, _Let> && __callable<_Tag, _Receiver, _As...>
             friend void tag_invoke(_Tag __tag, __receiver&& __self, _As&&... __as) noexcept {
-              _NVCXX_EXPAND_PACK(_As, __as,
+              // _NVCXX_EXPAND_PACK(_As, __as,
                 static_assert(__nothrow_callable<_Tag, _Receiver, _As...>);
-                __tag(std::move(__self).base(), (_As&&) __as...);
-              )
+                __self.__op_state_->propagate_completion_signal(__tag, (_As&&)__as...);
+              // )
             }
 
           friend auto tag_invoke(get_env_t, const __receiver& __self)
             -> env_of_t<_Receiver> {
-            return get_env(__self.base());
+            return get_env(__self.__op_state_->receiver_);
           }
 
           __operation<_SenderId, _ReceiverId, _FunId, _Let>* __op_state_;
@@ -239,7 +243,10 @@ namespace _P2300::execution {
 
       template <class _SenderId, class _ReceiverId, class _FunId, class _Let>
         using __operation_base = 
-          example::cuda::stream::detail::operation_state_t<_SenderId, std::__x<__receiver<_SenderId, _ReceiverId, _FunId, _Let>>>;
+          example::cuda::stream::detail::operation_state_t<
+            _SenderId, 
+            std::__x<__receiver<_SenderId, _ReceiverId, _FunId, _Let>>,
+            _ReceiverId>;
 
       template <class _SenderId, class _ReceiverId, class _FunId, class _Let>
         struct __operation : __operation_base<_SenderId, _ReceiverId, _FunId, _Let> {
@@ -261,23 +268,23 @@ namespace _P2300::execution {
             __operation(_Sender&& __sndr, _Receiver2&& __rcvr, _Fun __fun)
               : __operation_base<_SenderId, _ReceiverId, _FunId, _Let>(
                   (_Sender&&) __sndr, 
-                  [this] (example::cuda::stream::operation_state_base_t&) -> __receiver_t {
-                    return __receiver_t{this};
+                  std::execution::get_completion_scheduler<std::execution::set_value_t>(__sndr).hub_,
+                  (_Receiver2&&)__rcvr,
+                  [this] (example::cuda::stream::operation_state_base_t<std::__x<_Receiver2>> &) -> __receiver_t {
+                    return __receiver_t{{}, this};
                   })
-              , __rcvr_((_Receiver2&&) __rcvr)
               , __fun_((_Fun&&) __fun)
               , __sender_memory_(nullptr, cuda_deleter)
             {}
           _P2300_IMMOVABLE(__operation);
 
-          _Receiver __rcvr_;
           _Fun __fun_;
           __storage<_Sender, _Receiver, _Fun, _Let> __storage_;
           std::unique_ptr<std::uint8_t[], void(*)(std::uint8_t*)> __sender_memory_;
         };
 
       template <class _SenderId, class _FunId, class _SetId>
-        struct __sender {
+        struct __sender : example::cuda::stream::sender_base_t {
           using _Sender = __t<_SenderId>;
           using _Fun = __t<_FunId>;
           using _Set = __t<_SetId>;

@@ -49,7 +49,7 @@ namespace repeat_n_detail {
       friend void
       tag_invoke(std::execution::start_t, operation_state_t &self) noexcept {
         using inner_op_state_t = ex::connect_result_t<Sender, sink_receiver>;
-        if constexpr (std::is_base_of_v<stream::operation_state_base_t, inner_op_state_t>) {
+        if constexpr (std::is_base_of_v<stream::detail::op_state_base_t, inner_op_state_t>) {
           inner_op_state_t op_state = ex::connect((Sender&&)self.sender_, sink_receiver{});
           for (std::size_t i = 0; i < self.n_; i++) {
             ex::start(op_state);

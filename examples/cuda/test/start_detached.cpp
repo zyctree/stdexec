@@ -17,13 +17,15 @@ namespace stream = example::cuda::stream;
 using example::cuda::is_on_gpu;
 
 TEST_CASE("start_detached doesn't block", "[cuda][stream][consumers][start_detached]") {
+  stream::context_t stream_context{};
+
   int *host_flag{};
   int *device_flag{};
   cudaMallocHost(&host_flag, sizeof(int));
   cudaMallocHost(&device_flag, sizeof(int));
   *host_flag = *device_flag = 0;
 
-  auto snd = ex::schedule(stream::scheduler_t{}) //
+  auto snd = ex::schedule(stream_context.get_scheduler()) //
            | ex::then([=] {
                if (is_on_gpu()) {
                  cuda::atomic_ref<int, cuda::thread_scope_system> host_flag_ref(*host_flag);

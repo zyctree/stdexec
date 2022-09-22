@@ -37,54 +37,55 @@ template <class Fun, class ResultT, class... As>
   }
 
 template <class ReceiverId, class Fun>
-  class receiver_t
-    : std::execution::receiver_adaptor<receiver_t<ReceiverId, Fun>, std::__t<ReceiverId>>
-    , receiver_base_t {
-    using Receiver = std::__t<ReceiverId>;
-    friend std::execution::receiver_adaptor<receiver_t, Receiver>;
+  class receiver_t : receiver_base_t {
 
     Fun f_;
-    operation_state_base_t &op_state_;
+    operation_state_base_t<ReceiverId> &op_state_;
+
+  public:
 
     template <class Error>
-    void set_error(Error&& error) && noexcept 
+      friend void tag_invoke(std::execution::set_error_t, receiver_t&& self, Error&& error) noexcept
       requires std::__callable<Fun, Error> {
       using result_t = std::decay_t<std::invoke_result_t<Fun, std::decay_t<Error>>>;
 
-      cudaStream_t stream = op_state_.stream_;
+      cudaStream_t stream = self.op_state_.stream_;
 
       if constexpr (std::is_same_v<void, result_t>) {
-        kernel<Fun, std::decay_t<Error>><<<1, 1, 0, stream>>>(f_, error);
-
-        if constexpr (!std::is_base_of_v<receiver_base_t, Receiver>) {
-          cudaStreamSynchronize(stream);
-        }
-
-        std::execution::set_value(std::move(this->base()));
+        kernel<Fun, std::decay_t<Error>><<<1, 1, 0, stream>>>(self.f_, error);
+        self.op_state_.propagate_completion_signal(std::execution::set_value);
       } else {
         result_t *d_result{};
         cudaMallocAsync(&d_result, sizeof(result_t), stream);
-        kernel_with_result<Fun, std::decay_t<Error>><<<1, 1, 0, stream>>>(f_, d_result, error);
+        kernel_with_result<Fun, std::decay_t<Error>><<<1, 1, 0, stream>>>(self.f_, d_result, error);
 
         result_t h_result;
         cudaMemcpy(&h_result, d_result, sizeof(result_t), cudaMemcpyDeviceToHost);
-        std::execution::set_value(std::move(this->base()), h_result);
+        self.op_state_.propagate_completion_signal(std::execution::set_value, h_result);
         cudaFreeAsync(d_result, stream);
       }
     }
 
-   public:
-    explicit receiver_t(Receiver rcvr, Fun fun, operation_state_base_t &op_state)
-      : std::execution::receiver_adaptor<receiver_t, Receiver>((Receiver&&) rcvr)
-      , f_((Fun&&) fun)
+    template <std::__one_of<std::execution::set_value_t, 
+                            std::execution::set_stopped_t> Tag, class... As>
+      friend void tag_invoke(Tag tag, receiver_t&& self, As&&... as) noexcept {
+        self.op_state_.propagate_completion_signal(tag, (As&&)as...);
+      }
+
+    friend std::execution::env_of_t<std::__t<ReceiverId>> 
+    tag_invoke(std::execution::get_env_t, const receiver_t& self) {
+      return std::execution::get_env(self.op_state_.receiver_);
+    }
+
+    explicit receiver_t(Fun fun, operation_state_base_t<ReceiverId> &op_state)
+      : f_((Fun&&) fun)
       , op_state_(op_state)
     {}
   };
-
 }
 
 template <class SenderId, class FunId>
-  struct upon_error_sender_t {
+  struct upon_error_sender_t : sender_base_t {
     using Sender = std::__t<SenderId>;
     using Fun = std::__t<FunId>;
 
@@ -114,10 +115,13 @@ template <class SenderId, class FunId>
     template <std::__decays_to<upon_error_sender_t> Self, std::execution::receiver Receiver>
       requires std::execution::receiver_of<Receiver, completion_signatures<Self, std::execution::env_of_t<Receiver>>>
     friend auto tag_invoke(std::execution::connect_t, Self&& self, Receiver&& rcvr)
-      -> stream_op_state_t<std::__member_t<Self, Sender>, receiver_t<Receiver>> {
-        return stream_op_state<std::__member_t<Self, Sender>>(((Self&&)self).sndr_, [&](operation_state_base_t& stream_provider) -> receiver_t<Receiver> {
-          return receiver_t<Receiver>((Receiver&&)rcvr, self.fun_, stream_provider);
-        });
+      -> stream_op_state_t<std::__member_t<Self, Sender>, receiver_t<Receiver>, Receiver> {
+        return stream_op_state<std::__member_t<Self, Sender>>(
+            ((Self&&)self).sndr_, 
+            (Receiver&&)rcvr,
+            [&](operation_state_base_t<std::__x<Receiver>>& stream_provider) -> receiver_t<Receiver> {
+              return receiver_t<Receiver>(self.fun_, stream_provider);
+            });
     }
 
     template <std::__decays_to<upon_error_sender_t> Self, class Env>
