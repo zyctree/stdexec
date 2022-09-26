@@ -281,7 +281,7 @@ template <class... SenderIds>
             // the child operations.
             std::execution::set_stopped((Receiver&&) self.recvr_);
           } else {
-            apply([](auto&&... __child_ops) noexcept -> void {
+            std::apply([](auto&&... __child_ops) noexcept -> void {
               (std::execution::start(__child_ops), ...);
             }, self.child_states_);
           }

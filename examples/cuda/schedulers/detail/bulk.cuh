@@ -86,7 +86,7 @@ template <class SenderId, std::integral Shape, class FunId>
 
     using set_error_t = 
       std::execution::completion_signatures<
-        std::execution::set_error_t(std::exception_ptr)>;
+        std::execution::set_error_t(cudaError_t)>;
 
     template <class Receiver>
       using receiver_t = bulk::receiver_t<std::__x<Receiver>, Shape, Fun>;

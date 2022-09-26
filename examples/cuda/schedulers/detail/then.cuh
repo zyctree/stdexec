@@ -71,9 +71,12 @@ template <class ReceiverId, class Fun>
     }
 
     template <std::__one_of<std::execution::set_error_t, 
-                            std::execution::set_stopped_t> Tag, class... As>
+                            std::execution::set_stopped_t> Tag, 
+              class... As _NVCXX_CAPTURE_PACK(As)>
     friend void tag_invoke(Tag tag, receiver_t&& self, As&&... as) noexcept {
-      self.op_state_.propagate_completion_signal(tag, (As&&)as...);
+      _NVCXX_EXPAND_PACK(As, as,
+        self.op_state_.propagate_completion_signal(tag, (As&&)as...);
+      );
     }
 
     friend std::execution::env_of_t<Receiver> tag_invoke(std::execution::get_env_t, const receiver_t& self) {
@@ -95,10 +98,6 @@ template <class SenderId, class FunId>
 
     Sender sndr_;
     Fun fun_;
-
-    using set_error_t = 
-      std::execution::completion_signatures<
-        std::execution::set_error_t(std::exception_ptr)>;
 
     template <class Receiver>
       using receiver_t = then::receiver_t<std::__x<Receiver>, Fun>;

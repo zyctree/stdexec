@@ -18,33 +18,34 @@
 #include <execution.hpp>
 #include <type_traits>
 #include <cuda/atomic>
+#include <cuda/std/tuple>
 
 #include <iostream>
 
 #include "queue.cuh"
+#include "variant.cuh"
+#include "tuple.cuh"
 
 namespace example::cuda {
-
-enum class device_type {
-  host,
-  device
-};
+  enum class device_type {
+    host,
+    device
+  };
 
 #if defined(__clang__) && defined(__CUDA__)
-__host__ inline device_type get_device_type() { return device_type::host; }
-__device__ inline device_type get_device_type() { return device_type::device; }
+  __host__ inline device_type get_device_type() { return device_type::host; }
+  __device__ inline device_type get_device_type() { return device_type::device; }
 #else 
-__host__ __device__ inline device_type get_device_type() {
-  NV_IF_TARGET(NV_IS_HOST,
-               (return device_type::host;),
-               (return device_type::device;));
-}
+  __host__ __device__ inline device_type get_device_type() {
+    NV_IF_TARGET(NV_IS_HOST,
+                 (return device_type::host;),
+                 (return device_type::device;));
+  }
 #endif
 
-inline __host__ __device__ bool is_on_gpu() {
-  return get_device_type() == device_type::device;
-}
-
+  inline __host__ __device__ bool is_on_gpu() {
+    return get_device_type() == device_type::device;
+  }
 }
 
 namespace example::cuda::stream {
@@ -53,6 +54,9 @@ namespace example::cuda::stream {
   struct scheduler_t;
   struct sender_base_t {};
   struct receiver_base_t {};
+
+  template <class... Ts>
+    using decayed_tuple = tuple_t<std::decay_t<Ts>...>;
 
   template <class S>
     concept stream_sender = 
@@ -67,33 +71,47 @@ namespace example::cuda::stream {
   namespace detail {
     struct op_state_base_t{};
 
-    template <class EnvId>
+    template <class EnvId, class VariantId>
       class enqueue_receiver_t : receiver_base_t {
         using Env = std::__t<EnvId>;
+        using Variant = std::__t<VariantId>;
 
         Env env_;
+        Variant* variant_;
         queue::task_base_t* task_;
         queue::producer_t producer_;
 
       public:
-        template <std::__one_of<std::execution::set_value_t> Tag, class... As>
-        friend void tag_invoke(Tag tag, enqueue_receiver_t&& self, As&&... as) noexcept {
-          static_assert(sizeof...(As) == 0, "TODO Store data");
-          self.producer_(self.task_);
-        }
+        template <std::__one_of<std::execution::set_value_t,
+                                std::execution::set_error_t,
+                                std::execution::set_stopped_t> Tag, 
+                  class... As _NVCXX_CAPTURE_PACK(As)>
+          friend void tag_invoke(Tag tag, enqueue_receiver_t&& self, As&&... as) noexcept {
+            _NVCXX_EXPAND_PACK(As, as,
+              self.variant_->template emplace<decayed_tuple<Tag, As...>>(Tag{}, (As&&)as...);
+            );
+            self.producer_(self.task_);
+          }
 
-        template <std::__one_of<std::execution::set_error_t, 
-                                std::execution::set_stopped_t> Tag, class... As>
-        friend void tag_invoke(Tag tag, enqueue_receiver_t&& self, As&&... as) noexcept {
+        /*
+        friend void tag_invoke(std::execution::set_error_t, enqueue_receiver_t&& self, const std::exception_ptr&) noexcept {
+          self.variant_->template emplace<decayed_tuple<std::execution::set_error_t, cudaError_t>>(
+              std::execution::set_error, cudaErrorUnknown);
           self.producer_(self.task_);
         }
+        */
 
         friend Env tag_invoke(std::execution::get_env_t, const enqueue_receiver_t& self) {
           return self.env_;
         }
 
-        enqueue_receiver_t(Env env, queue::task_base_t* task, queue::producer_t producer)
+        enqueue_receiver_t(
+            Env env, 
+            Variant* variant,
+            queue::task_base_t* task, 
+            queue::producer_t producer)
           : env_(env)
+          , variant_(variant)
           , task_(task)
           , producer_(producer) {}
       };
@@ -103,17 +121,22 @@ namespace example::cuda::stream {
         tag(std::move(receiver), (As&&)as...);
       }
 
-    template <stream_receiver Receiver>
+    template <stream_receiver Receiver, class Variant>
       struct continuation_task_t : queue::task_base_t {
         Receiver receiver_;
+        Variant* variant_;
 
-        continuation_task_t (Receiver receiver)
-          : receiver_{receiver} {
+        continuation_task_t (Receiver receiver, Variant* variant)
+          : receiver_{receiver}
+          , variant_{variant} {
           this->execute_ = [](task_base_t* t) noexcept {
             continuation_task_t &self = *reinterpret_cast<continuation_task_t*>(t);
 
-            // TODO Load completion tag
-            std::execution::set_value(std::move(self.receiver_));
+            visit([&self](auto& tpl) {
+                apply([&self](auto tag, auto... as) {
+                  tag(std::move(self.receiver_), as...);
+                }, tpl);
+            }, *self.variant_);
           };
           this->next_ = nullptr;
         }
@@ -155,6 +178,7 @@ namespace example::cuda::stream {
         if (owner_) {
           cudaStreamDestroy(stream_);
           stream_ = 0;
+          owner_ = false;
         }
       }
     };
@@ -186,14 +210,49 @@ namespace example::cuda::stream {
         using inner_receiver_t = std::__t<InnerReceiverId>;
         using outer_receiver_t = std::__t<OuterReceiverId>;
         using env_t = std::execution::env_of_t<outer_receiver_t>;
+
+        template <class... _Ts>
+          using variant =
+            std::__minvoke<
+              std::__if_c<
+                sizeof...(_Ts) != 0,
+                std::__transform<std::__q1<std::decay_t>, std::__munique<std::__q<variant_t>>>,
+                std::__mconst<std::execution::__not_a_variant>>,
+              _Ts...>;
+
+        template <class... _Ts>
+          using bind_tuples =
+            std::__mbind_front_q<
+              variant,
+              // tuple_t<std::execution::set_stopped_t>, 
+              // tuple_t<std::execution::set_error_t, cudaError_t>, 
+              _Ts...>;
+
+        using bound_values_t =
+          std::execution::__value_types_of_t<
+            sender_t,
+            env_t,
+            std::__mbind_front_q<decayed_tuple, std::execution::set_value_t>,
+            std::__q<bind_tuples>>;
+
+        using variant_t =
+          std::execution::__error_types_of_t<
+            sender_t,
+            env_t,
+            std::__transform<
+              // std::__mbind_front<std::__replace<std::exception_ptr, cudaError_t, std::__q<decayed_tuple>>, std::execution::set_error_t>,
+              std::__mbind_front_q<decayed_tuple, std::execution::set_error_t>,
+              bound_values_t>>;
+
+        using task_t = detail::continuation_task_t<inner_receiver_t, variant_t>;
         using intermediate_receiver = std::__t<std::conditional_t<
           stream_sender<sender_t>, 
           std::__x<inner_receiver_t>,
-          std::__x<detail::enqueue_receiver_t<std::__x<env_t>>>>>;
+          std::__x<detail::enqueue_receiver_t<std::__x<env_t>, std::__x<variant_t>>>>>;
         using inner_op_state_t = std::execution::connect_result_t<sender_t, intermediate_receiver>;
-        using task_t = detail::continuation_task_t<inner_receiver_t>;
 
         queue::task_hub_t* hub_;
+        queue::host_ptr<variant_t> storage_;
         queue::host_ptr<task_t> task_;
         inner_op_state_t inner_op_;
 
@@ -226,11 +285,12 @@ namespace example::cuda::stream {
         operation_state_t(sender_t&& sender, queue::task_hub_t* hub, OutR&& out_receiver, ReceiverProvider receiver_provider)
           : operation_state_base_t<OuterReceiverId>((outer_receiver_t&&)out_receiver)
           , hub_(hub)
-          , task_(queue::make_host<task_t>(receiver_provider(*this)))
+          , storage_(queue::make_host<variant_t>())
+          , task_(queue::make_host<task_t>(receiver_provider(*this), storage_.get()))
           , inner_op_{
               std::execution::connect((sender_t&&)sender, 
-              detail::enqueue_receiver_t<std::__x<env_t>>{
-                std::execution::get_env(out_receiver), task_.get(), hub_->producer()})}
+              detail::enqueue_receiver_t<std::__x<env_t>, std::__x<variant_t>>{
+                std::execution::get_env(out_receiver), storage_.get(), task_.get(), hub_->producer()})}
         {}
       };
   }

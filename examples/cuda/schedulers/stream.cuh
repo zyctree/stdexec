@@ -70,14 +70,12 @@ namespace example::cuda::stream {
       struct operation_state_t {
         using R = std::__t<R_>;
         [[no_unique_address]] R rec_;
-        friend void tag_invoke(std::execution::start_t, operation_state_t& op) noexcept try {
+        friend void tag_invoke(std::execution::start_t, operation_state_t& op) noexcept {
           if constexpr (stream_receiver<R>) {
             std::execution::set_value((R&&)op.rec_);
           } else {
             detail::continuation_kernel<std::decay_t<R>, std::execution::set_value_t><<<1, 1>>>(op.rec_, std::execution::set_value);
           }
-        } catch(...) {
-          std::execution::set_error((R&&) op.rec_, std::current_exception());
         }
       };
 
@@ -85,7 +83,7 @@ namespace example::cuda::stream {
       using completion_signatures =
         std::execution::completion_signatures<
           std::execution::set_value_t(),
-          std::execution::set_error_t(std::exception_ptr)>;
+          std::execution::set_error_t(cudaStream_t)>;
 
       template <class R>
         friend auto tag_invoke(std::execution::connect_t, sender_t, R&& rec)

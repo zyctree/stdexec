@@ -113,9 +113,9 @@ namespace _P2300::this_thread {
             __rcvr.__state_->__data_.template emplace<3>(__d);
             __rcvr.__loop_->finish();
           }
-          friend __env
+          friend std::execution::__empty_env
           tag_invoke(execution::get_env_t, const __receiver& __rcvr) noexcept {
-            return {__rcvr.__loop_->get_scheduler()};
+            return {};
           }
         };
 
