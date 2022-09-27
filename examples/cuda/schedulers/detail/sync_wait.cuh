@@ -21,151 +21,139 @@
 #include "common.cuh"
 #include "schedulers/detail/queue.cuh"
 
-namespace _P2300::this_thread {
-  namespace stream_sync_wait {
+namespace example::cuda::stream {
+  namespace sync_wait {
     namespace __impl {
-      template <class _Sender>
-        using __into_variant_result_t =
-          decltype(execution::into_variant(__declval<_Sender>()));
-
       struct __env {
-        execution::run_loop::__scheduler __sched_;
+        std::execution::run_loop::__scheduler __sched_;
 
-        friend auto tag_invoke(execution::get_scheduler_t, const __env& __self) noexcept
-          -> execution::run_loop::__scheduler {
+        friend auto tag_invoke(std::execution::get_scheduler_t, const __env& __self) noexcept
+          -> std::execution::run_loop::__scheduler {
           return __self.__sched_;
         }
 
-        friend auto tag_invoke(execution::get_delegatee_scheduler_t, const __env& __self) noexcept
-          -> execution::run_loop::__scheduler {
+        friend auto tag_invoke(std::execution::get_delegatee_scheduler_t, const __env& __self) noexcept
+          -> std::execution::run_loop::__scheduler {
           return __self.__sched_;
         }
       };
 
       // What should sync_wait(just_stopped()) return?
-      template <class _Sender>
-          requires execution::sender<_Sender, __env>
-        using __sync_wait_result_t =
-          execution::value_types_of_t<
-            _Sender,
+      template <class Sender>
+          requires std::execution::sender<Sender, __env>
+        using sync_wait_result_t =
+          std::execution::value_types_of_t<
+            Sender,
             __env,
-            execution::__decayed_tuple,
-            __single_t>;
+            std::execution::__decayed_tuple,
+            std::__single_t>;
 
-      template <class _Sender>
-        using __sync_wait_with_variant_result_t =
-          __sync_wait_result_t<__into_variant_result_t<_Sender>>;
+      template <class SenderId>
+        struct state_t;
 
-      template <class _SenderId>
-        struct __state;
+      struct sink_receiver_t : receiver_base_t {
+        template <class... As>
+          friend void tag_invoke(std::execution::set_value_t, sink_receiver_t&& rcvr, As&&... as) noexcept {
+          }
+        template <class Error>
+          friend void tag_invoke(std::execution::set_error_t, sink_receiver_t&& rcvr, Error err) noexcept {
+          }
+        friend void tag_invoke(std::execution::set_stopped_t __d, sink_receiver_t&& rcvr) noexcept {
+        }
+        friend std::execution::__empty_env
+        tag_invoke(std::execution::get_env_t, const sink_receiver_t& rcvr) noexcept {
+          return {};
+        }
+      };
 
-        struct __sink_receiver : example::cuda::stream::receiver_base_t {
-          template <class... _As>
-          friend void tag_invoke(execution::set_value_t, __sink_receiver&& __rcvr, _As&&... __as) noexcept {
-          }
-          template <class _Error>
-          friend void tag_invoke(execution::set_error_t, __sink_receiver&& __rcvr, _Error __err) noexcept {
-          }
-          friend void tag_invoke(execution::set_stopped_t __d, __sink_receiver&& __rcvr) noexcept {
-          }
-          friend execution::__empty_env
-          tag_invoke(execution::get_env_t, const __sink_receiver& __rcvr) noexcept {
-            return {};
-          }
-        };
+      template <class SenderId>
+        struct receiver_t : receiver_base_t {
+          using Sender = std::__t<SenderId>;
 
-      template <class _SenderId>
-        struct __receiver : example::cuda::stream::receiver_base_t {
-          using _Sender = __t<_SenderId>;
+          state_t<SenderId>* state_;
+          std::execution::run_loop* loop_;
+          operation_state_base_t<std::__x<sink_receiver_t>>& op_state_;
 
-          __state<_SenderId>* __state_;
-          execution::run_loop* __loop_;
-          example::cuda::stream::operation_state_base_t<std::__x<__sink_receiver>>& op_state_;
-
-          template <class _Error>
-          void __set_error(_Error __err) noexcept {
-            if constexpr (__decays_to<_Error, std::exception_ptr>)
-              __state_->__data_.template emplace<2>((_Error&&) __err);
-            else if constexpr (__decays_to<_Error, std::error_code>)
-              __state_->__data_.template emplace<2>(std::make_exception_ptr(std::system_error(__err)));
-            else
-              __state_->__data_.template emplace<2>(std::make_exception_ptr((_Error&&) __err));
-            __loop_->finish();
-          }
-          template <class _Sender2 = _Sender, class... _As _NVCXX_CAPTURE_PACK(_As)>
-            requires constructible_from<__sync_wait_result_t<_Sender2>, _As...>
-          friend void tag_invoke(execution::set_value_t, __receiver&& __rcvr, _As&&... __as) noexcept try {
-            cudaStreamSynchronize(__rcvr.op_state_.stream_);
-            _NVCXX_EXPAND_PACK(_As, __as,
-              __rcvr.__state_->__data_.template emplace<1>((_As&&) __as...);
-            )
-            __rcvr.__loop_->finish();
-          } catch(...) {
-            __rcvr.__set_error(std::current_exception());
-          }
-          template <class _Error>
-          friend void tag_invoke(execution::set_error_t, __receiver&& __rcvr, _Error __err) noexcept {
-            cudaStreamSynchronize(__rcvr.op_state_.stream_);
-            __rcvr.__set_error((_Error &&) __err);
-          }
-          friend void tag_invoke(execution::set_stopped_t __d, __receiver&& __rcvr) noexcept {
-            cudaStreamSynchronize(__rcvr.op_state_.stream_);
-            __rcvr.__state_->__data_.template emplace<3>(__d);
-            __rcvr.__loop_->finish();
+          template <class Error>
+            void set_error(Error err) noexcept {
+              if constexpr (std::__decays_to<Error, std::exception_ptr>)
+                state_->data_.template emplace<2>((Error&&) err);
+              else if constexpr (std::__decays_to<Error, std::error_code>)
+                state_->data_.template emplace<2>(std::make_exception_ptr(std::system_error(err)));
+              else
+                state_->data_.template emplace<2>(std::make_exception_ptr((Error&&) err));
+              loop_->finish();
+            }
+          template <class Sender2 = Sender, class... As _NVCXX_CAPTURE_PACK(As)>
+              requires std::constructible_from<sync_wait_result_t<Sender2>, As...>
+            friend void tag_invoke(std::execution::set_value_t, receiver_t&& rcvr, As&&... as) noexcept try {
+              cudaStreamSynchronize(rcvr.op_state_.stream_);
+              _NVCXX_EXPAND_PACK(As, as,
+                rcvr.state_->data_.template emplace<1>((As&&) as...);
+              )
+              rcvr.loop_->finish();
+            } catch(...) {
+              rcvr.set_error(std::current_exception());
+            }
+          template <class Error>
+            friend void tag_invoke(std::execution::set_error_t, receiver_t&& rcvr, Error err) noexcept {
+              cudaStreamSynchronize(rcvr.op_state_.stream_);
+              rcvr.set_error((Error &&) err);
+            }
+          friend void tag_invoke(std::execution::set_stopped_t __d, receiver_t&& rcvr) noexcept {
+            cudaStreamSynchronize(rcvr.op_state_.stream_);
+            rcvr.state_->data_.template emplace<3>(__d);
+            rcvr.loop_->finish();
           }
           friend std::execution::__empty_env
-          tag_invoke(execution::get_env_t, const __receiver& __rcvr) noexcept {
+          tag_invoke(std::execution::get_env_t, const receiver_t& rcvr) noexcept {
             return {};
           }
         };
 
-      template <class _SenderId>
-        struct __state {
-          using _Tuple = __sync_wait_result_t<__t<_SenderId>>;
-          std::variant<std::monostate, _Tuple, std::exception_ptr, execution::set_stopped_t> __data_{};
+      template <class SenderId>
+        struct state_t {
+          using _Tuple = sync_wait_result_t<std::__t<SenderId>>;
+          std::variant<std::monostate, _Tuple, std::exception_ptr, std::execution::set_stopped_t> data_{};
         };
-
-      template <class _Sender>
-        using __into_variant_result_t =
-          decltype(execution::into_variant(__declval<_Sender>()));
     } // namespace __impl
 
     struct sync_wait_t {
-      template <execution::__single_value_variant_sender<__impl::__env> _Sender>
+      template <std::execution::__single_value_variant_sender<__impl::__env> Sender>
         requires
-          (!execution::__tag_invocable_with_completion_scheduler<
-            sync_wait_t, execution::set_value_t, _Sender>) &&
-          (!tag_invocable<sync_wait_t, _Sender>) &&
-          execution::sender<_Sender, __impl::__env> &&
-          execution::sender_to<_Sender, __impl::__receiver<__x<_Sender>>>
-      auto operator()(example::cuda::stream::detail::queue::task_hub_t* hub, _Sender&& __sndr) const
-        -> std::optional<__impl::__sync_wait_result_t<_Sender>> {
-        using state_t = __impl::__state<__x<_Sender>>;
-        state_t __state {};
-        execution::run_loop __loop;
+          (!std::execution::__tag_invocable_with_completion_scheduler<
+            sync_wait_t, std::execution::set_value_t, Sender>) &&
+          (!std::tag_invocable<sync_wait_t, Sender>) &&
+          std::execution::sender<Sender, __impl::__env> &&
+          std::execution::sender_to<Sender, __impl::receiver_t<std::__x<Sender>>>
+      auto operator()(detail::queue::task_hub_t* hub, Sender&& __sndr) const
+        -> std::optional<__impl::sync_wait_result_t<Sender>> {
+        using state_t = __impl::state_t<std::__x<Sender>>;
+        state_t state {};
+        std::execution::run_loop loop;
 
         // Launch the sender with a continuation that will fill in a variant
         // and notify a condition variable.
         auto __op_state =
-          example::cuda::stream::stream_op_state(
+          stream_op_state(
             hub,
-            (_Sender&&) __sndr,
-            __impl::__sink_receiver{},
-            [&](example::cuda::stream::operation_state_base_t<std::__x<__impl::__sink_receiver>>& stream_provider) -> __impl::__receiver<__x<_Sender>> {
-              return __impl::__receiver<__x<_Sender>>{{}, &__state, &__loop, stream_provider};
+            (Sender&&) __sndr,
+            __impl::sink_receiver_t{},
+            [&](operation_state_base_t<std::__x<__impl::sink_receiver_t>>& stream_provider) -> __impl::receiver_t<std::__x<Sender>> {
+              return __impl::receiver_t<std::__x<Sender>>{{}, &state, &loop, stream_provider};
             });
-        execution::start(__op_state);
+        std::execution::start(__op_state);
 
         // Wait for the variant to be filled in.
-        __loop.run();
+        loop.run();
 
-        if (__state.__data_.index() == 2)
-          rethrow_exception(std::get<2>(__state.__data_));
+        if (state.data_.index() == 2)
+          std::rethrow_exception(std::get<2>(state.data_));
 
-        if (__state.__data_.index() == 3)
+        if (state.data_.index() == 3)
           return std::nullopt;
 
-        return std::move(std::get<1>(__state.__data_));
+        return std::move(std::get<1>(state.data_));
       }
     };
   } // namespace stream_sync_wait

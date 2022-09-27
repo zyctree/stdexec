@@ -39,13 +39,13 @@ namespace example::cuda::stream {
     using bulk_sender_th = bulk_sender_t<std::__x<std::remove_cvref_t<Sender>>, Shape, std::__x<std::remove_cvref_t<Fun>>>;
 
   template <std::execution::sender Sender>
-    using split_sender_th = std::execution::stream_split::__sender<std::__x<std::remove_cvref_t<Sender>>>;
+    using split_sender_th = split_sender_t<std::__x<std::remove_cvref_t<Sender>>>;
 
   template <std::execution::sender Sender, class Fun>
     using then_sender_th = then_sender_t<std::__x<std::remove_cvref_t<Sender>>, std::__x<std::remove_cvref_t<Fun>>>;
 
   template <std::execution::sender... Senders>
-    using when_all_sender_th = example::cuda::stream::when_all_sender_t<std::__x<std::decay_t<Senders>>...>;
+    using when_all_sender_th = when_all_sender_t<std::__x<std::decay_t<Senders>>...>;
 
   template <std::execution::sender Sender, class Fun>
     using upon_error_sender_th = upon_error_sender_t<std::__x<std::remove_cvref_t<Sender>>, std::__x<std::remove_cvref_t<Fun>>>;
@@ -54,11 +54,10 @@ namespace example::cuda::stream {
     using upon_stopped_sender_th = upon_stopped_sender_t<std::__x<std::remove_cvref_t<Sender>>, std::__x<std::remove_cvref_t<Fun>>>;
 
   template <class Let, std::execution::sender Sender, class Fun>
-    using let_xxx_th = _P2300::execution::stream_let::__impl::__sender<std::__x<std::remove_cvref_t<Sender>>, std::__x<std::remove_cvref_t<Fun>>, Let>;
+    using let_xxx_th = let_sender_t<std::__x<std::remove_cvref_t<Sender>>, std::__x<std::remove_cvref_t<Fun>>, Let>;
 
   template <std::execution::sender Sender>
-    using transfer_sender_th = 
-      example::cuda::stream::transfer_sender_t<std::__x<Sender>>;
+    using transfer_sender_th = transfer_sender_t<std::__x<Sender>>;
 
   struct scheduler_t {
     friend context_t;
@@ -177,7 +176,7 @@ namespace example::cuda::stream {
     template <std::execution::sender S>
     friend auto
     tag_invoke(std::this_thread::sync_wait_t, const scheduler_t& self, S&& sndr) {
-      return std::this_thread::stream_sync_wait::sync_wait_t{}(self.hub_, (S&&)sndr);
+      return sync_wait::sync_wait_t{}(self.hub_, (S&&)sndr);
     }
 
     friend std::execution::forward_progress_guarantee tag_invoke(

@@ -87,42 +87,26 @@ TEST_CASE("then returns values on GPU", "[cuda][stream][adaptors][then]") {
   REQUIRE(result == 42);
 }
 
-TEST_CASE("then can preceed a sender", "[cuda][stream][adaptors][then]") {
+TEST_CASE("then can preceed a sender without values", "[cuda][stream][adaptors][then]") {
   stream::context_t stream_context{};
 
-  SECTION("without values") {
-    flags_storage_t<2> flags_storage{};
-    auto flags = flags_storage.get();
+  flags_storage_t<2> flags_storage{};
+  auto flags = flags_storage.get();
 
-    auto snd = ex::schedule(stream_context.get_scheduler()) //
-             | ex::then([flags] {
-                 if (is_on_gpu()) {
-                   flags.set(0);
-                 }
-               })
-             | a_sender([flags] {
-                 if (is_on_gpu()) {
-                   flags.set(1);
-                 }
-               });
-    std::this_thread::sync_wait(std::move(snd));
+  auto snd = ex::schedule(stream_context.get_scheduler()) //
+           | ex::then([flags] {
+               if (is_on_gpu()) {
+                 flags.set(0);
+               }
+             })
+           | a_sender([flags] {
+               if (is_on_gpu()) {
+                 flags.set(1);
+               }
+             });
+  std::this_thread::sync_wait(std::move(snd));
 
-    REQUIRE(flags_storage.all_set_once());
-  }
-
-#if 0 // NVHPC Fails
-  SECTION("wit values") {
-    auto snd = ex::schedule(stream_context.get_scheduler()) //
-             | ex::then([]() -> bool {
-                 return is_on_gpu();
-               })
-             | a_sender([](bool then_was_on_gpu) {
-                 // return then_was_on_gpu && is_on_gpu();;
-               });
-    auto [ok] = std::this_thread::sync_wait(std::move(snd)).value();
-    REQUIRE(ok);
-  }
-#endif
+  REQUIRE(flags_storage.all_set_once());
 }
 
 TEST_CASE("then can succeed a sender", "[cuda][stream][adaptors][then]") {
@@ -155,7 +139,7 @@ TEST_CASE("then can succeed a sender", "[cuda][stream][adaptors][then]") {
                })
              | ex::then([](int a_sender_was_on_gpu) -> int {
                  int on_gpu = is_on_gpu();
-                 // int res = a_sender_was_on_gpu && on_gpu; // TODO NVBug
+                 // int res = a_sender_was_on_gpu && on_gpu; // nvbug/3810019
                  int res = a_sender_was_on_gpu * on_gpu;
                  return res;
                });

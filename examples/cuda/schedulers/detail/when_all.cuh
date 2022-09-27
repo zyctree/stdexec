@@ -100,7 +100,7 @@ template <class... SenderIds>
     template <class CvrefReceiverId, std::size_t Index>
       struct receiver_t 
         : std::execution::receiver_adaptor<receiver_t<CvrefReceiverId, Index>>
-        , example::cuda::stream::receiver_base_t {
+        , receiver_base_t {
         using WhenAll = std::__member_t<CvrefReceiverId, when_all_sender_t>;
         using Receiver = std::__t<std::decay_t<CvrefReceiverId>>;
         using Traits =
