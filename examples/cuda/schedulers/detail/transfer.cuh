@@ -25,7 +25,8 @@ namespace example::cuda::stream {
 namespace transfer {
 
   template <std::size_t I, class T>
-    void fetch(cudaStream_t, T&) {
+    void fetch(cudaStream_t stream, T&) {
+      cudaStreamSynchronize(stream);
     }
 
   template <std::size_t I, class T, class Head, class... As>
@@ -67,7 +68,6 @@ namespace transfer {
           if constexpr (gpu_stream_sender<Sender>) {
             std::tuple<std::decay_t<As>...> h_as;
             fetch<0>(stream, h_as, (As&&)as...);
-            cudaStreamSynchronize(stream);
 
             std::apply([&](auto&&... tas) {
               tag(std::move(self.operation_state_.receiver_.receiver_), tas...);

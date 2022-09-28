@@ -77,6 +77,37 @@ namespace example::cuda::stream {
   namespace detail {
     struct op_state_base_t{};
 
+    namespace h2d {
+      template <bool Async, std::size_t I, class T>
+        void fetch(cudaStream_t stream, T&) {
+          if constexpr (!Async) {
+            cudaStreamSynchronize(stream);
+          }
+        }
+
+      template <bool Async, std::size_t I, class T, class Head, class... As>
+        void fetch(cudaStream_t stream, T& tpl, Head&& head, As&&... as) {
+          cudaMemcpyAsync(&std::get<I>(tpl), &head, sizeof(std::decay_t<Head>), cudaMemcpyDeviceToHost, stream);
+          fetch<Async, I + 1>(stream, tpl, (As&&)as...);
+        }
+
+      template <bool Async, class SenderId, class Fn, class... As>
+        void propagate(cudaStream_t stream, Fn fn, As&&... as) {
+          using Sender = std::__t<SenderId>;
+
+          if constexpr (gpu_stream_sender<Sender>) {
+            std::tuple<std::decay_t<As>...> h_as;
+            fetch<Async, 0>(stream, h_as, (As&&)as...);
+            std::apply([&](auto&&... tas) { fn(tas...); }, h_as);
+          } else {
+            if constexpr (!Async) {
+              cudaStreamSynchronize(stream);
+            }
+            fn((As&&)as...); 
+          }
+        }
+    }
+
     template <class EnvId, class VariantId>
       class enqueue_receiver_t : receiver_base_t {
         using Env = std::__t<EnvId>;

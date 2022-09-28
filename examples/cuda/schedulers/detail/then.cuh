@@ -26,14 +26,14 @@ namespace then {
 
 template <class Fun, class... As>
   __launch_bounds__(1) 
-  __global__ void kernel(Fun fn, As... as) {
-    fn(as...);
+  __global__ void kernel(Fun fn, As&&... as) {
+    fn((As&&)as...);
   }
 
 template <class Fun, class ResultT, class... As>
   __launch_bounds__(1) 
-  __global__ void kernel_with_result(Fun fn, ResultT* result, As... as) {
-    *result = fn(as...);
+  __global__ void kernel_with_result(Fun fn, ResultT* result, As&&... as) {
+    *result = fn((As&&)as...);
   }
 
 template <class ReceiverId, class Fun>
@@ -47,24 +47,20 @@ template <class ReceiverId, class Fun>
 
     template <class... As _NVCXX_CAPTURE_PACK(As)>
     friend void tag_invoke(std::execution::set_value_t, receiver_t&& self, As&&... as) 
-      noexcept requires std::__callable<Fun, As...> {
+      noexcept requires std::__callable<Fun, As&&...> {
       _NVCXX_EXPAND_PACK(As, as,
-        using result_t = std::decay_t<std::invoke_result_t<Fun, std::decay_t<As>...>>;
+        using result_t = std::decay_t<std::invoke_result_t<Fun, As...>>;
 
         cudaStream_t stream = self.op_state_.stream_;
 
         if constexpr (std::is_same_v<void, result_t>) {
-          kernel<Fun, std::decay_t<As>...><<<1, 1, 0, stream>>>(self.f_, as...);
+          kernel<Fun, As&&...><<<1, 1, 0, stream>>>(self.f_, (As&&)as...);
           self.op_state_.propagate_completion_signal(std::execution::set_value);
         } else {
           result_t *d_result{};
           cudaMallocAsync(&d_result, sizeof(result_t), stream);
-          kernel_with_result<Fun, std::decay_t<As>...><<<1, 1, 0, stream>>>(self.f_, d_result, as...);
-
-          // TODO References in completion signature 
-          result_t h_result;
-          cudaMemcpy(&h_result, d_result, sizeof(result_t), cudaMemcpyDeviceToHost);
-          self.op_state_.propagate_completion_signal(std::execution::set_value, h_result);
+          kernel_with_result<Fun, result_t, As&&...><<<1, 1, 0, stream>>>(self.f_, d_result, (As&&)as...);
+          self.op_state_.propagate_completion_signal(std::execution::set_value, *d_result);
           cudaFreeAsync(d_result, stream);
         }
       );
@@ -92,7 +88,7 @@ template <class ReceiverId, class Fun>
 }
 
 template <class SenderId, class FunId>
-  struct then_sender_t : sender_base_t {
+  struct then_sender_t : gpu_sender_base_t {
     using Sender = std::__t<SenderId>;
     using Fun = std::__t<FunId>;
 
@@ -101,6 +97,14 @@ template <class SenderId, class FunId>
 
     template <class Receiver>
       using receiver_t = then::receiver_t<std::__x<Receiver>, Fun>;
+
+    template <class Fun, class... Args>
+        requires std::invocable<Fun, Args...>
+      using set_value_invoke_t =
+        std::execution::completion_signatures<
+          std::__minvoke1<
+            std::__remove<void, std::__qf<std::execution::set_value_t>>,
+            std::add_lvalue_reference_t<std::invoke_result_t<Fun, Args...>>>>;
 
     template <class Self, class Env>
       using completion_signatures =

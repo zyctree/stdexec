@@ -19,6 +19,7 @@
 #include <type_traits>
 
 #include "common.cuh"
+#include "queue.cuh"
 
 namespace example::cuda::stream {
 
@@ -103,6 +104,7 @@ template <class... SenderIds>
         , receiver_base_t {
         using WhenAll = std::__member_t<CvrefReceiverId, when_all_sender_t>;
         using Receiver = std::__t<std::decay_t<CvrefReceiverId>>;
+        using SenderId = example::cuda::detail::nth_type<Index, SenderIds...>;
         using Traits =
           completion_sigs<
             std::__member_t<CvrefReceiverId, std::execution::env_of_t<Receiver>>>;
@@ -134,12 +136,7 @@ template <class... SenderIds>
               // We only need to bother recording the completion values
               // if we're not already in the "error" or "stopped" state.
               if (op_state_->state_ == when_all::started) {
-                try {
-                  std::get<Index>(op_state_->values_).emplace(
-                      (Values&&) vals...);
-                } catch(...) {
-                  set_error(std::current_exception(), when_all::started);
-                }
+                op_state_->template store_values<Index>((Values&&)vals...);
               }
             }
             op_state_->arrive();
@@ -205,6 +202,15 @@ template <class... SenderIds>
             }
           }
         }
+
+        template <std::size_t Index, class... As>
+          void store_values(As&&... as) noexcept {
+            using SenderId = example::cuda::detail::nth_type<Index, SenderIds...>;
+            cudaStream_t stream = std::get<Index>(child_states_).stream_;
+            detail::h2d::propagate<true /* async */, SenderId>(stream, [&](auto&&... args) {
+              std::get<Index>(this->values_).emplace((As&&)args...);
+            }, (As&&)as...);
+          }
 
         void complete() noexcept {
           // Stop callback is no longer needed. Destroy it.

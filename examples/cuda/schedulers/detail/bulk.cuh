@@ -25,7 +25,7 @@ namespace example::cuda::stream {
 namespace bulk {
   template <int BlockThreads, std::integral Shape, class Fun, class... As>
     __launch_bounds__(BlockThreads) 
-    __global__ void kernel(Shape shape, Fun fn, As... as) {
+    __global__ void kernel(Shape shape, Fun fn, As&&... as) {
       const int tid = static_cast<int>(threadIdx.x + blockIdx.x * blockDim.x);
 
       if (tid < static_cast<int>(shape)) {
@@ -45,13 +45,13 @@ namespace bulk {
     public:
       template <class... As _NVCXX_CAPTURE_PACK(As)>
         friend void tag_invoke(std::execution::set_value_t, receiver_t&& self, As&&... as) 
-          noexcept requires std::__callable<Fun, Shape, std::decay_t<As>...> {
+          noexcept requires std::__callable<Fun, Shape, As...> {
           _NVCXX_EXPAND_PACK(As, as,
             constexpr int block_threads = 256;
             const int grid_blocks = (static_cast<int>(self.shape_) + block_threads - 1) / block_threads;
-            kernel<block_threads, Shape, Fun, std::decay_t<As>...>
+            kernel<block_threads, Shape, Fun, As...>
                     <<<grid_blocks, block_threads, 0, self.op_state_.stream_>>>(
-                      self.shape_, self.f_, as...);
+                      self.shape_, self.f_, (As&&)as...);
 
             self.op_state_.propagate_completion_signal(std::execution::set_value, (As&&)as...);
           );
@@ -76,7 +76,7 @@ namespace bulk {
 }
 
 template <class SenderId, std::integral Shape, class FunId>
-  struct bulk_sender_t : sender_base_t {
+  struct bulk_sender_t : gpu_sender_base_t {
     using Sender = std::__t<SenderId>;
     using Fun = std::__t<FunId>;
 
@@ -94,7 +94,7 @@ template <class SenderId, std::integral Shape, class FunId>
     template <class... Tys>
     using set_value_t = 
       std::execution::completion_signatures<
-        std::execution::set_value_t(std::decay_t<Tys>...)>;
+        std::execution::set_value_t(Tys...)>;
 
     template <class Self, class Env>
       using completion_signatures =

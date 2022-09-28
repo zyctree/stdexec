@@ -66,9 +66,9 @@ namespace reduce_ {
         cub::DeviceReduce::Reduce(d_temp_storage, temp_storage_size, self.d_in_,
                                   d_out, self.num_items_, self.f_, value_t{},
                                   stream);
+        cudaFreeAsync(d_temp_storage, stream);
 
         self.op_state_.propagate_completion_signal(std::execution::set_value, *d_out);
-        cudaFreeAsync(d_temp_storage, stream);
         cudaFreeAsync(d_out, stream);
       }
 

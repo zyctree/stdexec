@@ -52,16 +52,13 @@ template <class ReceiverId, class Fun>
       cudaStream_t stream = self.op_state_.stream_;
 
       if constexpr (std::is_same_v<void, result_t>) {
-        kernel<Fun, std::decay_t<Error>><<<1, 1, 0, stream>>>(self.f_, error);
+        kernel<Fun, Error><<<1, 1, 0, stream>>>(self.f_, (Error&&)error);
         self.op_state_.propagate_completion_signal(std::execution::set_value);
       } else {
         result_t *d_result{};
         cudaMallocAsync(&d_result, sizeof(result_t), stream);
-        kernel_with_result<Fun, std::decay_t<Error>><<<1, 1, 0, stream>>>(self.f_, d_result, error);
-
-        result_t h_result;
-        cudaMemcpy(&h_result, d_result, sizeof(result_t), cudaMemcpyDeviceToHost);
-        self.op_state_.propagate_completion_signal(std::execution::set_value, h_result);
+        kernel_with_result<Fun, Error><<<1, 1, 0, stream>>>(self.f_, d_result, error);
+        self.op_state_.propagate_completion_signal(std::execution::set_value, *d_result);
         cudaFreeAsync(d_result, stream);
       }
     }
@@ -85,7 +82,7 @@ template <class ReceiverId, class Fun>
 }
 
 template <class SenderId, class FunId>
-  struct upon_error_sender_t : sender_base_t {
+  struct upon_error_sender_t : gpu_sender_base_t {
     using Sender = std::__t<SenderId>;
     using Fun = std::__t<FunId>;
 

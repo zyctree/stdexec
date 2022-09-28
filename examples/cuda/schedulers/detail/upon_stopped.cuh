@@ -56,10 +56,7 @@ template <class ReceiverId, class Fun>
         result_t *d_result{};
         cudaMallocAsync(&d_result, sizeof(result_t), stream);
         kernel_with_result<Fun><<<1, 1, 0, stream>>>(self.f_, d_result);
-
-        result_t h_result;
-        cudaMemcpy(&h_result, d_result, sizeof(result_t), cudaMemcpyDeviceToHost);
-        self.op_state_.propagate_completion_signal(std::execution::set_value, h_result);
+        self.op_state_.propagate_completion_signal(std::execution::set_value, *d_result);
         cudaFreeAsync(d_result, stream);
       }
     }
@@ -84,7 +81,7 @@ template <class ReceiverId, class Fun>
 }
 
 template <class SenderId, class FunId>
-  struct upon_stopped_sender_t : sender_base_t {
+  struct upon_stopped_sender_t : gpu_sender_base_t {
     using Sender = std::__t<SenderId>;
     using Fun = std::__t<FunId>;
 

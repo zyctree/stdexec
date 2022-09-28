@@ -24,8 +24,8 @@ namespace example::cuda::stream {
   namespace let_xxx {
     template <class Fun, class ResultSenderT, class... As>
       __launch_bounds__(1) 
-      __global__ void kernel_with_result(Fun fn, ResultSenderT* result, As... as) {
-        new (result) ResultSenderT(fn(as...));
+      __global__ void kernel_with_result(Fun fn, ResultSenderT* result, As&&... as) {
+        new (result) ResultSenderT(fn((As&&)as...));
       }
 
     template <class... _Ts>
@@ -112,7 +112,6 @@ namespace example::cuda::stream {
         // sender:
         using __args_t =
           std::execution::__gather_sigs_t<_SetTag, _Sender, std::execution::env_of_t<_Receiver>, std::__q<std::execution::__decayed_tuple>, std::execution::__nullable_variant_t>;
-        __args_t __args_;
 
         // Compute a variant of operation states:
         using __op_state3_t =
@@ -190,16 +189,14 @@ namespace example::cuda::stream {
               using __tuple_t = __which_tuple_t<_As...>;
               using __op_state_t = std::__mapply<std::__q<__op_state_for_t>, __tuple_t>;
 
-              using result_sender_t = __result_sender_t<_Fun, std::decay_t<_As>...>;
+              using result_sender_t = __result_sender_t<_Fun, _As...>;
 
               cudaStream_t stream = __self.__op_state_->stream_;
 
               auto result_sender = reinterpret_cast<result_sender_t *>(__self.__op_state_->__sender_memory_.get());
-              kernel_with_result<<<1, 1, 0, stream>>>(__self.__op_state_->__fun_, result_sender, __as...);
+              kernel_with_result<<<1, 1, 0, stream>>>(__self.__op_state_->__fun_, result_sender, (_As&&)__as...);
               cudaStreamSynchronize(stream);
 
-              auto& __args =
-                __self.__op_state_->__storage_.__args_.template emplace<__tuple_t>((_As&&) __as...);
               auto& __op = __self.__op_state_->__storage_.__op_state3_.template emplace<__op_state_t>(
                 std::__conv{[&] {
                   return std::execution::connect(

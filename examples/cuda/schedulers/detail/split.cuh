@@ -22,27 +22,35 @@
 
 namespace example::cuda::stream {
   namespace split {
-    template <class _SharedState>
+    template <std::size_t I, class T>
+      void fetch(cudaStream_t stream, T&) {
+        cudaStreamSynchronize(stream);
+      }
+
+    template <std::size_t I, class T, class Head, class... As>
+      void fetch(cudaStream_t stream, T& tpl, Head&& head, As&&... as) {
+        cudaMemcpyAsync(&std::get<I>(tpl), &head, sizeof(std::decay_t<Head>), cudaMemcpyDeviceToHost, stream);
+        fetch<I + 1>(stream, tpl, (As&&)as...);
+      }
+
+    template <class _SenderId, class _SharedState>
       class __receiver : receiver_base_t {
+        using Sender = std::__t<_SenderId>;
+
         _SharedState &__sh_state_;
 
       public:
         template <std::__one_of<std::execution::set_value_t, std::execution::set_error_t, std::execution::set_stopped_t> _Tag, class... _As _NVCXX_CAPTURE_PACK(_As)>
         friend void tag_invoke(_Tag __tag, __receiver&& __self, _As&&... __as) noexcept {
-          _SharedState &__state = __self.__sh_state_;
+          using __tuple_t = std::execution::__decayed_tuple<_Tag, _As...>;
 
-          if constexpr (std::is_base_of_v<detail::op_state_base_t, typename _SharedState::inner_op_state_t>) {
-            cudaStreamSynchronize(__state.__op_state2_.stream_);
-          }
+          _SharedState &__state = __self.__sh_state_;
+          cudaStream_t stream = __state.__op_state2_.stream_;
 
           _NVCXX_EXPAND_PACK(_As, __as,
-            try {
-              using __tuple_t = std::execution::__decayed_tuple<_Tag, _As...>;
-              __state.__data_.template emplace<__tuple_t>(__tag, (_As &&) __as...);
-            } catch (...) {
-              using __tuple_t = std::execution::__decayed_tuple<std::execution::set_error_t, std::exception_ptr>;
-              __state.__data_.template emplace<__tuple_t>(std::execution::set_error, std::current_exception());
-            }
+            detail::h2d::propagate<false /* async */, _SenderId>(stream, [&](auto&&... args) {
+                __state.__data_.template emplace<__tuple_t>(_Tag{}, args...);
+              }, (_As&&)__as...);
           )
           __state.__notify();
         }
@@ -91,7 +99,7 @@ namespace example::cuda::stream {
               std::__mbind_front_q<std::execution::__decayed_tuple, std::execution::set_error_t>,
               __bound_values_t>>;
 
-        using __receiver_ = __receiver<__sh_state>;
+        using __receiver_ = __receiver<_SenderId, __sh_state>;
         using inner_op_state_t = std::execution::connect_result_t<_Sender, __receiver_>;
 
         std::execution::in_place_stop_source __stop_source_{};

@@ -30,6 +30,26 @@ namespace queue {
     fn_t* execute_{};
   };
 
+  struct device_deleter_t {
+    template <class T>
+    void operator()(T *ptr) {
+      cudaFree(ptr);
+    }
+  };
+
+  template <class T>
+  using device_ptr = std::unique_ptr<T, device_deleter_t>;
+
+  template <class T, class... As>
+  device_ptr<T> make_device(As&&... as) {
+    T h((As&&)as...);
+
+    T* ptr{};
+    cudaMalloc(&ptr, sizeof(T));
+    cudaMemcpy(&ptr, &h, sizeof(T), cudaMemcpyHostToDevice); // TODO Kernel + placement new?
+    return device_ptr<T>(ptr);
+  }
+
   struct host_deleter_t {
     template <class T>
     void operator()(T *ptr) {

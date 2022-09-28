@@ -24,6 +24,54 @@ namespace example::cuda::stream {
 
 namespace schedule_from {
 
+  template <std::size_t I, class T>
+    void alloc_and_fetch_async(cudaStream_t, T&) {
+    }
+
+  template <std::size_t I, class T, class Head, class... As>
+    void alloc_and_fetch_async(cudaStream_t stream, T& tpl, Head&& head, As&&... as) {
+      cudaMallocAsync(&std::get<I>(tpl), sizeof(std::decay_t<Head>), stream);
+      cudaMemcpyAsync(std::get<I>(tpl), &head, sizeof(std::decay_t<Head>), cudaMemcpyHostToDevice, stream);
+      alloc_and_fetch_async<I + 1>(stream, tpl, (As&&)as...);
+    }
+
+  inline void free_async(cudaStream_t) {
+  }
+
+  template <class Head, class... As>
+  void free_async(cudaStream_t stream, Head head, As... as) {
+    cudaFreeAsync(head, stream);
+    free_async(stream, as...);
+  }
+
+  template <class ReceiverId>
+    struct receiver_t : receiver_base_t {
+      operation_state_base_t<ReceiverId>& operation_state_;
+
+      template <std::__one_of<std::execution::set_value_t, 
+                              std::execution::set_error_t, 
+                              std::execution::set_stopped_t> Tag, 
+                class... As  _NVCXX_CAPTURE_PACK(As)>
+      friend void tag_invoke(Tag tag, receiver_t&& self, As&&... as) noexcept {
+        auto stream = self.operation_state_.stream_;
+        _NVCXX_EXPAND_PACK(As, as,
+          std::tuple<std::decay_t<As>*...> d_as;
+          alloc_and_fetch_async<0>(stream, d_as, (As&&)as...);
+          std::apply([&](auto&&... tas) {
+            self.operation_state_.template propagate_completion_signal<Tag, std::add_lvalue_reference_t<As>...>(Tag{}, *tas...);
+          }, d_as);
+          std::apply([&](auto&&... tas) {
+            free_async(stream, tas...);
+          }, d_as);
+        );
+      }
+
+      friend std::execution::env_of_t<std::__t<ReceiverId>> 
+      tag_invoke(std::execution::get_env_t, const receiver_t& self) {
+        return std::execution::get_env(self.operation_state_.receiver_);
+      }
+    };
+
   template <class Sender>
     struct source_sender_t : sender_base_t {
       template <std::__decays_to<source_sender_t> Self, std::execution::receiver Receiver>
@@ -53,7 +101,7 @@ namespace schedule_from {
 }
 
 template <class Scheduler, class SenderId>
-  struct schedule_from_sender_t : sender_base_t {
+  struct schedule_from_sender_t : gpu_sender_base_t {
     using Sender = std::__t<SenderId>;
     using source_sender_th = schedule_from::source_sender_t<Sender>;
 
@@ -61,7 +109,7 @@ template <class Scheduler, class SenderId>
     source_sender_th sndr_;
 
     template <class Receiver>
-      using receiver_t = propagate_receiver_t<std::__x<Receiver>>;
+      using receiver_t = schedule_from::receiver_t<std::__x<Receiver>>;
 
     template <std::__decays_to<schedule_from_sender_t> Self, std::execution::receiver Receiver>
       requires std::execution::sender_to<std::__member_t<Self, source_sender_th>, Receiver>
