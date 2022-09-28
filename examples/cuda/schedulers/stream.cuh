@@ -33,6 +33,8 @@
 #include "detail/upon_stopped.cuh"
 #include "detail/when_all.cuh"
 
+#include "detail/reduce.cuh"
+
 namespace example::cuda::stream {
 
   template <std::execution::sender Sender, std::integral Shape, class Fun>

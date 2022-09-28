@@ -20,6 +20,7 @@
 
 #include "common.cuh"
 #include "schedulers/detail/queue.cuh"
+#include "schedulers/detail/transfer.cuh"
 
 namespace example::cuda::stream {
   namespace sync_wait {
@@ -87,7 +88,7 @@ namespace example::cuda::stream {
           template <class Sender2 = Sender, class... As _NVCXX_CAPTURE_PACK(As)>
               requires std::constructible_from<sync_wait_result_t<Sender2>, As...>
             friend void tag_invoke(std::execution::set_value_t, receiver_t&& rcvr, As&&... as) noexcept try {
-              cudaStreamSynchronize(rcvr.op_state_.stream_);
+              cudaStream_t stream = rcvr.op_state_.stream_;
               _NVCXX_EXPAND_PACK(As, as,
                 rcvr.state_->data_.template emplace<1>((As&&) as...);
               )
@@ -97,11 +98,9 @@ namespace example::cuda::stream {
             }
           template <class Error>
             friend void tag_invoke(std::execution::set_error_t, receiver_t&& rcvr, Error err) noexcept {
-              cudaStreamSynchronize(rcvr.op_state_.stream_);
               rcvr.set_error((Error &&) err);
             }
           friend void tag_invoke(std::execution::set_stopped_t __d, receiver_t&& rcvr) noexcept {
-            cudaStreamSynchronize(rcvr.op_state_.stream_);
             rcvr.state_->data_.template emplace<3>(__d);
             rcvr.loop_->finish();
           }
@@ -116,6 +115,9 @@ namespace example::cuda::stream {
           using _Tuple = sync_wait_result_t<std::__t<SenderId>>;
           std::variant<std::monostate, _Tuple, std::exception_ptr, std::execution::set_stopped_t> data_{};
         };
+
+      template <std::execution::sender Sender>
+        using transfer_sender_th = transfer_sender_t<std::__x<Sender>>;
     } // namespace __impl
 
     struct sync_wait_t {
@@ -132,12 +134,13 @@ namespace example::cuda::stream {
         state_t state {};
         std::execution::run_loop loop;
 
+        // TODO Get rid of stream op state. No need if we use transfer 
         // Launch the sender with a continuation that will fill in a variant
         // and notify a condition variable.
         auto __op_state =
           stream_op_state(
             hub,
-            (Sender&&) __sndr,
+            __impl::transfer_sender_th<Sender>(hub, (Sender&&)__sndr),
             __impl::sink_receiver_t{},
             [&](operation_state_base_t<std::__x<__impl::sink_receiver_t>>& stream_provider) -> __impl::receiver_t<std::__x<Sender>> {
               return __impl::receiver_t<std::__x<Sender>>{{}, &state, &loop, stream_provider};

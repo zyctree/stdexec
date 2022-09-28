@@ -24,6 +24,16 @@ namespace example::cuda::stream {
 
 namespace transfer {
 
+  template <std::size_t I, class T>
+    void fetch(cudaStream_t, T&) {
+    }
+
+  template <std::size_t I, class T, class Head, class... As>
+    void fetch(cudaStream_t stream, T& tpl, Head&& head, As&&... as) {
+      cudaMemcpyAsync(&std::get<I>(tpl), &head, sizeof(std::decay_t<Head>), cudaMemcpyDeviceToHost, stream);
+      fetch<I + 1>(stream, tpl, (As&&)as...);
+    }
+
   template <class ReceiverId>
   struct sink_receiver_t : receiver_base_t {
     using Receiver = std::__t<ReceiverId>;
@@ -41,8 +51,9 @@ namespace transfer {
     }
   };
 
-  template <class ReceiverId>
+  template <class SenderId, class ReceiverId>
     struct bypass_receiver_t : receiver_base_t {
+      using Sender = std::__t<SenderId>;
       operation_state_base_t<ReceiverId>& operation_state_;
 
       template <std::__one_of<std::execution::set_value_t, 
@@ -50,9 +61,21 @@ namespace transfer {
                               std::execution::set_stopped_t> Tag,
                 class... As _NVCXX_CAPTURE_PACK(As)>
       friend void tag_invoke(Tag tag, bypass_receiver_t&& self, As&&... as) noexcept {
+        auto stream = self.operation_state_.stream_;
+
         _NVCXX_EXPAND_PACK(As, as,
-          cudaStreamSynchronize(self.operation_state_.stream_);
-          tag(std::move(self.operation_state_.receiver_.receiver_), (As&&)as...);
+          if constexpr (gpu_stream_sender<Sender>) {
+            std::tuple<std::decay_t<As>...> h_as;
+            fetch<0>(stream, h_as, (As&&)as...);
+            cudaStreamSynchronize(stream);
+
+            std::apply([&](auto&&... tas) {
+              tag(std::move(self.operation_state_.receiver_.receiver_), tas...);
+            }, h_as);
+          } else {
+            cudaStreamSynchronize(stream);
+            tag(std::move(self.operation_state_.receiver_.receiver_), (As&&)as...);
+          }
         );
       }
 
@@ -71,7 +94,7 @@ template <class SenderId>
     Sender sndr_;
 
     template <class Receiver>
-      using receiver_t = transfer::bypass_receiver_t<std::__x<transfer::sink_receiver_t<std::__x<Receiver>>>>;
+      using receiver_t = transfer::bypass_receiver_t<SenderId, std::__x<transfer::sink_receiver_t<std::__x<Receiver>>>>;
 
     template <std::__decays_to<transfer_sender_t> Self, std::execution::receiver Receiver>
       requires std::execution::sender_to<std::__member_t<Self, Sender>, Receiver>

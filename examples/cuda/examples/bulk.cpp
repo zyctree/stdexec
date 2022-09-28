@@ -14,5 +14,5 @@ int main() {
   auto snd = ex::schedule(stream_context.get_scheduler()) 
            | ex::bulk(4, [](int idx) { std::printf("hello from %d\n", idx); });
 
-  std::this_thread::sync_wait(snd);
+  std::this_thread::sync_wait(std::move(snd));
 }

@@ -53,6 +53,7 @@ namespace example::cuda::stream {
   struct context_t;
   struct scheduler_t;
   struct sender_base_t {};
+  struct gpu_sender_base_t : sender_base_t {};
   struct receiver_base_t {};
 
   template <class... Ts>
@@ -62,6 +63,11 @@ namespace example::cuda::stream {
     concept stream_sender = 
       std::execution::sender<S> &&
       std::is_base_of_v<sender_base_t, std::decay_t<S>>;
+
+  template <class S>
+    concept gpu_stream_sender = 
+      std::execution::sender<S> &&
+      std::is_base_of_v<gpu_sender_base_t, std::decay_t<S>>;
 
   template <class R>
     concept stream_receiver = 
