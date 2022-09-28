@@ -17,9 +17,12 @@ int main() {
 
   auto snd = ex::schedule(stream_context.get_scheduler()) 
            | ex::bulk(n, [d_in](int idx) { d_in[idx] = idx; })
-           | stream::reduce(d_in, n);
+           | stream::reduce(d_in, n)
+           | ex::then([](int sum) {
+               return sum * 2;
+             }); 
 
-  auto  expect = n * (n - 1) / 2;
+  auto  expect = n * (n - 1);
   auto [result] = std::this_thread::sync_wait(std::move(snd)).value();
 
   std::cout << (expect == result ? "OK" : "FAIL") 
