@@ -171,11 +171,18 @@ namespace example::cuda::stream {
 
             visit([&self](auto& tpl) {
                 apply([&self](auto tag, auto... as) {
-                  tag(std::move(self.receiver_), as...);
+                  tag(std::move(self.receiver_), decltype(as)(as)...);
                 }, tpl);
             }, *self.variant_);
           };
           this->next_ = nullptr;
+
+          cudaMalloc(&this->atom_next_, sizeof(task_base_t*));
+          cudaMemset(this->atom_next_, 0, sizeof(task_base_t*));
+        }
+
+        ~continuation_task_t() {
+          cudaFree(this->atom_next_);
         }
       };
   }
@@ -197,7 +204,7 @@ namespace example::cuda::stream {
           if constexpr (stream_receiver<outer_receiver_t>) {
             tag((outer_receiver_t&&)receiver_, (As&&)as...);
           } else {
-            detail::continuation_kernel<std::decay_t<outer_receiver_t>, Tag, std::decay_t<As>...><<<1, 1>>>(receiver_, tag, (As&&)as...);
+            detail::continuation_kernel<std::decay_t<outer_receiver_t>, Tag, As...><<<1, 1>>>(receiver_, tag, (As&&)as...);
           }
         );
       }

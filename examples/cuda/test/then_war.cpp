@@ -10,8 +10,6 @@ namespace stream = example::cuda::stream;
 using example::cuda::is_on_gpu;
 
 // nvbug/3810154
-// TODO
-/*
 TEST_CASE("then can preceed a sender with values", "[cuda][stream][adaptors][then]") {
   stream::context_t stream_context{};
 
@@ -23,5 +21,4 @@ TEST_CASE("then can preceed a sender with values", "[cuda][stream][adaptors][the
   auto [ok] = std::this_thread::sync_wait(std::move(snd)).value();
   REQUIRE(ok);
 }
-*/
 

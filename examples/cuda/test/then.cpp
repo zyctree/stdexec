@@ -131,26 +131,23 @@ TEST_CASE("then can succeed a sender", "[cuda][stream][adaptors][then]") {
     REQUIRE(flags_storage.all_set_once());
   }
 
-// TODO
-/*
   SECTION("with values") {
     stream::context_t stream_context{};
     flags_storage_t flags_storage{};
     auto flags = flags_storage.get();
 
     auto snd = ex::schedule(stream_context.get_scheduler()) //
-             | a_sender([]() -> int {
+             | a_sender([]() -> bool {
                  return is_on_gpu();
                })
-             | ex::then([flags](int a_sender_was_on_gpu) {
-                 int on_gpu = is_on_gpu();
-                 std::printf("\n --> %d - %d\n\n", a_sender_was_on_gpu, on_gpu);
-                 flags.set(a_sender_was_on_gpu * on_gpu);
+             | ex::then([flags](bool a_sender_was_on_gpu) {
+                 if (a_sender_was_on_gpu * is_on_gpu()) {
+                   flags.set();
+                 }
                });
     std::this_thread::sync_wait(std::move(snd)).value();
 
     REQUIRE(flags_storage.all_set_once());
   }
-*/
 }
 

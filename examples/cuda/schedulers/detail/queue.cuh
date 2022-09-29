@@ -27,6 +27,7 @@ namespace queue {
     using fn_t = void(task_base_t*) noexcept;
 
     task_base_t* next_{};
+    task_base_t* atom_next_{};
     fn_t* execute_{};
   };
 
@@ -46,7 +47,7 @@ namespace queue {
 
     T* ptr{};
     cudaMalloc(&ptr, sizeof(T));
-    cudaMemcpy(&ptr, &h, sizeof(T), cudaMemcpyHostToDevice); // TODO Kernel + placement new?
+    cudaMemcpy(ptr, &h, sizeof(T), cudaMemcpyHostToDevice); // TODO Kernel + placement new?
     return device_ptr<T>(ptr);
   }
 
@@ -59,7 +60,8 @@ namespace queue {
 
   template <class T>
   using host_ptr = std::unique_ptr<T, host_deleter_t>;
-  using atomic_task_ref = ::cuda::atomic_ref<task_base_t*, ::cuda::thread_scope_system>;
+  using task_ref = ::cuda::atomic_ref<task_base_t*, ::cuda::thread_scope_system>;
+  using atom_task_ref = ::cuda::atomic_ref<task_base_t*, ::cuda::thread_scope_device>;
 
   template <class T, class... As>
   host_ptr<T> make_host(As&&... as) {
@@ -73,15 +75,17 @@ namespace queue {
     task_base_t** tail_;
 
     void operator()(task_base_t* task) {
-      atomic_task_ref tail_ref(*tail_);
+      atom_task_ref tail_ref(*tail_); 
       task_base_t* old_tail = tail_ref.load(::cuda::memory_order_acquire);
 
       while (true) {
-        atomic_task_ref next_ref(old_tail->next_);
+        atom_task_ref atom_next_ref(old_tail->atom_next_);
 
         task_base_t* expected = nullptr;
-        if (next_ref.compare_exchange_weak(
+        if (atom_next_ref.compare_exchange_weak(
               expected, task, ::cuda::memory_order_release, ::cuda::memory_order_relaxed)) {
+          task_ref next_ref(old_tail->next_);
+          next_ref.store(task);
           break;
         }
 
@@ -102,49 +106,43 @@ namespace queue {
 
   struct poller_t {
     task_base_t *head_;
-    task_base_t *sentinel_;
-    producer_t producer_;
     std::thread poller_;
+    ::cuda::std::atomic_flag stopped_ = ATOMIC_FLAG_INIT;
 
-    poller_t(task_base_t* head, producer_t producer)
-      : head_(head)
-      , sentinel_(head)
-      , producer_(producer) {
+    poller_t(task_base_t* head) : head_(head) {
       poller_ = std::thread([this] {
         task_base_t* current = head_;
 
         while (true) {
-          atomic_task_ref next_ref(current->next_);
+          task_ref next_ref(current->next_);
 
           while(next_ref.load(::cuda::memory_order_relaxed) == nullptr) {
+            if (stopped_.test()) {
+              return;
+            }
             std::this_thread::yield();
           }
           current = next_ref.load(::cuda::memory_order_acquire);
-
-          if (current == sentinel_) {
-            return;
-          }
-
           current->execute_(current);
         }
       });
     }
 
     ~poller_t() {
-      producer_(sentinel_);
+      stopped_.test_and_set();
       poller_.join();
     }
   };
 
   struct task_hub_t {
     host_ptr<root_task_t> head_;
-    host_ptr<task_base_t*> tail_ptr_;
+    device_ptr<task_base_t*> tail_ptr_;
     poller_t poller_;
 
     task_hub_t()
       : head_(make_host<root_task_t>())
-      , tail_ptr_(make_host<task_base_t*>(head_.get()))
-      , poller_(head_.get(), producer()) {
+      , tail_ptr_(make_device<task_base_t*>(head_.get()))
+      , poller_(head_.get()) {
     }
 
     producer_t producer() {
