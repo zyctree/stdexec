@@ -118,7 +118,7 @@ template <class SenderId, class IteratorId, class FunId>
         std::execution::make_completion_signatures<
           std::__member_t<Self, Sender>,
           Env,
-          std::execution::completion_signatures<std::execution::set_error_t(cudaGraph_t)>,
+          std::execution::completion_signatures<std::execution::set_error_t(cudaError_t)>,
           set_value_t>;
 
     template <std::__decays_to<reduce_sender_t> Self, std::execution::receiver Receiver>

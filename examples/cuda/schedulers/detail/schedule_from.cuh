@@ -19,39 +19,52 @@
 #include <type_traits>
 
 #include "common.cuh"
+#include "tuple.cuh"
+#include "variant.cuh"
 
 namespace example::cuda::stream {
 
 namespace schedule_from {
 
-  template <std::size_t I, class T>
-    void alloc_and_fetch_async(cudaStream_t, T&) {
-    }
-
-  template <std::size_t I, class T, class Head, class... As>
-    void alloc_and_fetch_async(cudaStream_t stream, T& tpl, Head&& head, As&&... as) {
-      THROW_ON_CUDA_ERROR(cudaMallocAsync(&std::get<I>(tpl),
-                                          sizeof(std::decay_t<Head>),
-                                          stream));
-      THROW_ON_CUDA_ERROR(cudaMemcpyAsync(std::get<I>(tpl),
-                                          &head,
-                                          sizeof(std::decay_t<Head>),
-                                          cudaMemcpyHostToDevice,
-                                          stream));
-      alloc_and_fetch_async<I + 1>(stream, tpl, (As&&)as...);
-    }
-
-  inline void free_async(cudaStream_t) {
-  }
-
-  template <class Head, class... As>
-  void free_async(cudaStream_t stream, Head head, As... as) {
-    THROW_ON_CUDA_ERROR(cudaFreeAsync(head, stream));
-    free_async(stream, as...);
-  }
-
-  template <class ReceiverId>
+  template <class SenderId, class ReceiverId>
     struct receiver_t : receiver_base_t {
+      using Sender = std::__t<SenderId>;
+      using Receiver = std::__t<ReceiverId>;
+
+      template <class... _Ts>
+        using variant =
+          std::__minvoke<
+            std::__if_c<
+              sizeof...(_Ts) != 0,
+              std::__transform<std::__q1<std::decay_t>, std::__munique<std::__q<variant_t>>>,
+              std::__mconst<std::execution::__not_a_variant>>,
+            _Ts...>;
+
+      template <class... _Ts>
+        using bind_tuples =
+          std::__mbind_front_q<
+            variant,
+            tuple_t<std::execution::set_stopped_t>,
+            _Ts...>;
+
+      using bound_values_t =
+        std::execution::__value_types_of_t<
+          Sender,
+          std::execution::env_of_t<Receiver>,
+          std::__mbind_front_q<decayed_tuple, std::execution::set_value_t>,
+          std::__q<bind_tuples>>;
+
+      using storage_t =
+        std::execution::__error_types_of_t<
+          Sender,
+          std::execution::env_of_t<Receiver>,
+          std::__transform<
+            // std::__mbind_front<std::__replace<std::exception_ptr, cudaError_t, std::__q<decayed_tuple>>, std::execution::set_error_t>,
+            std::__mbind_front_q<decayed_tuple, std::execution::set_error_t>,
+            bound_values_t>>;
+
+      constexpr static std::size_t memory_allocation_size = sizeof(storage_t);
+
       operation_state_base_t<ReceiverId>& operation_state_;
 
       template <std::__one_of<std::execution::set_value_t,
@@ -61,14 +74,15 @@ namespace schedule_from {
       friend void tag_invoke(Tag tag, receiver_t&& self, As&&... as) noexcept {
         auto stream = self.operation_state_.stream_;
         _NVCXX_EXPAND_PACK(As, as,
-          std::tuple<std::decay_t<As>*...> d_as;
-          alloc_and_fetch_async<0>(stream, d_as, (As&&)as...);
-          std::apply([&](auto&&... tas) {
-            self.operation_state_.template propagate_completion_signal<Tag, std::add_lvalue_reference_t<As>...>(Tag{}, *tas...);
-          }, d_as);
-          std::apply([&](auto&&... tas) {
-            free_async(stream, tas...);
-          }, d_as);
+          storage_t *storage = reinterpret_cast<storage_t*>(self.operation_state_.temp_storage_);
+          storage->template emplace<decayed_tuple<Tag, As...>>(Tag{}, (As&&)as...);
+
+          visit([&](auto& tpl) {
+            apply([&](auto tag, auto&&... tas) {
+              self.operation_state_.template propagate_completion_signal(
+                  tag, (std::decay_t<decltype(tas)>&)tas...);
+            }, tpl);
+          }, *storage);
         );
       }
 
@@ -114,19 +128,21 @@ template <class Scheduler, class SenderId>
     detail::queue::task_hub_t* hub_;
     source_sender_th sndr_;
 
-    template <class Receiver>
-      using receiver_t = schedule_from::receiver_t<std::__x<Receiver>>;
+    template <class Self, class Receiver>
+      using receiver_t = schedule_from::receiver_t<
+        std::__x<std::__member_t<Self, Sender>>, 
+        std::__x<Receiver>>;
 
     template <std::__decays_to<schedule_from_sender_t> Self, std::execution::receiver Receiver>
       requires std::execution::sender_to<std::__member_t<Self, source_sender_th>, Receiver>
     friend auto tag_invoke(std::execution::connect_t, Self&& self, Receiver&& rcvr)
-      -> stream_op_state_t<std::__member_t<Self, source_sender_th>, receiver_t<Receiver>, Receiver> {
+      -> stream_op_state_t<std::__member_t<Self, source_sender_th>, receiver_t<Self, Receiver>, Receiver> {
         return stream_op_state<std::__member_t<Self, source_sender_th>>(
             self.hub_,
             ((Self&&)self).sndr_,
             (Receiver&&)rcvr,
-            [&](operation_state_base_t<std::__x<Receiver>>& stream_provider) -> receiver_t<Receiver> {
-              return receiver_t<Receiver>{{}, stream_provider};
+            [&](operation_state_base_t<std::__x<Receiver>>& stream_provider) -> receiver_t<Self, Receiver> {
+              return receiver_t<Self, Receiver>{{}, stream_provider};
             });
     }
 

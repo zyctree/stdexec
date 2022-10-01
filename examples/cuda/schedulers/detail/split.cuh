@@ -19,24 +19,10 @@
 #include <type_traits>
 
 #include "common.cuh"
+#include "schedulers/detail/throw_on_cuda_error.cuh"
 
 namespace example::cuda::stream {
   namespace split {
-    template <std::size_t I, class T>
-      void fetch(cudaStream_t stream, T&) {
-        THROW_ON_CUDA_ERROR(cudaStreamSynchronize(stream));
-      }
-
-    template <std::size_t I, class T, class Head, class... As>
-      void fetch(cudaStream_t stream, T& tpl, Head&& head, As&&... as) {
-        THROW_ON_CUDA_ERROR(cudaMemcpyAsync(&std::get<I>(tpl),
-                                            &head,
-                                            sizeof(std::decay_t<Head>),
-                                            cudaMemcpyDeviceToHost,
-                                            stream));
-        fetch<I + 1>(stream, tpl, (As&&)as...);
-      }
-
     template <class _SenderId, class _SharedState>
       class __receiver : public receiver_base_t {
         using Sender = std::__t<_SenderId>;
@@ -46,15 +32,13 @@ namespace example::cuda::stream {
       public:
         template <std::__one_of<std::execution::set_value_t, std::execution::set_error_t, std::execution::set_stopped_t> _Tag, class... _As _NVCXX_CAPTURE_PACK(_As)>
         friend void tag_invoke(_Tag __tag, __receiver&& __self, _As&&... __as) noexcept {
-          using __tuple_t = std::execution::__decayed_tuple<_Tag, _As...>;
-
           _SharedState &__state = __self.__sh_state_;
           cudaStream_t stream = __state.__op_state2_.stream_;
+          THROW_ON_CUDA_ERROR(cudaStreamSynchronize(stream));
 
           _NVCXX_EXPAND_PACK(_As, __as,
-            detail::h2d::propagate<false /* async */, _SenderId>(stream, [&](auto&&... args) {
-                __state.__data_.template emplace<__tuple_t>(_Tag{}, args...);
-              }, (_As&&)__as...);
+            using __tuple_t = decayed_tuple<_Tag, _As...>;
+            __state.__data_->template emplace<__tuple_t>(_Tag{}, __as...);
           )
           __state.__notify();
         }
@@ -83,16 +67,17 @@ namespace example::cuda::stream {
         template <class... _Ts>
           using __bind_tuples =
             std::__mbind_front_q<
-              std::execution::__variant,
-              std::tuple<std::execution::set_stopped_t>, // Initial state of the variant is set_stopped
-              std::tuple<std::execution::set_error_t, std::exception_ptr>,
+              variant_t,
+              tuple_t<std::execution::set_stopped_t>, // Initial state of the variant is set_stopped
+              // tuple_t<std::execution::set_error_t, cudaError_t>,
+              // tuple_t<std::execution::set_error_t, std::exception_ptr>,
               _Ts...>;
 
         using __bound_values_t =
           std::execution::__value_types_of_t<
             _Sender,
             std::execution::make_env_t<std::execution::with_t<std::execution::get_stop_token_t, std::execution::in_place_stop_token>>,
-            std::__mbind_front_q<std::execution::__decayed_tuple, std::execution::set_value_t>,
+            std::__mbind_front_q<decayed_tuple, std::execution::set_value_t>,
             std::__q<__bind_tuples>>;
 
         using __variant_t =
@@ -100,7 +85,7 @@ namespace example::cuda::stream {
             _Sender,
             std::execution::make_env_t<std::execution::with_t<std::execution::get_stop_token_t, std::execution::in_place_stop_token>>,
             std::__transform<
-              std::__mbind_front_q<std::execution::__decayed_tuple, std::execution::set_error_t>,
+              std::__mbind_front_q<decayed_tuple, std::execution::set_error_t>,
               __bound_values_t>>;
 
         using __receiver_ = __receiver<_SenderId, __sh_state>;
@@ -108,13 +93,19 @@ namespace example::cuda::stream {
 
         std::execution::in_place_stop_source __stop_source_{};
         inner_op_state_t __op_state2_;
-        __variant_t __data_;
+        __variant_t *__data_;
         std::atomic<void*> __head_;
 
         explicit __sh_state(_Sender& __sndr)
           : __op_state2_(std::execution::connect((_Sender&&) __sndr, __receiver_{*this}))
-          , __head_{nullptr}
-        {}
+          , __head_{nullptr} {
+          THROW_ON_CUDA_ERROR(cudaMallocManaged(&__data_, sizeof(__variant_t)));
+          new (__data_) __variant_t();
+        }
+
+        ~__sh_state() {
+          THROW_ON_CUDA_ERROR(cudaFree(__data_));
+        }
 
         void __notify() noexcept {
           void* const __completion_state = static_cast<void*>(this);
@@ -162,11 +153,11 @@ namespace example::cuda::stream {
           __operation *__op = static_cast<__operation*>(__self);
           __op->__on_stop_.reset();
 
-          std::visit([&](const auto& __tupl) noexcept -> void {
-            std::apply([&](auto __tag, const auto&... __args) noexcept -> void {
+          visit([&](auto& __tupl) noexcept -> void {
+            apply([&](auto __tag, auto&&... __args) noexcept -> void {
               __tag((_Receiver&&) __op->__recvr_, __args...);
             }, __tupl);
-          }, __op->__shared_state_->__data_);
+          }, *__op->__shared_state_->__data_);
         }
 
         friend void tag_invoke(std::execution::start_t, __operation& __self) noexcept {

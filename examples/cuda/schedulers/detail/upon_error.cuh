@@ -46,7 +46,7 @@ template <class ReceiverId, class Fun>
 
     template <class Error>
       friend void tag_invoke(std::execution::set_error_t, receiver_t&& self, Error&& error) noexcept
-      requires std::__callable<Fun, Error> {
+        requires std::__callable<Fun, Error> {
       using result_t = std::decay_t<std::invoke_result_t<Fun, std::decay_t<Error>>>;
 
       cudaStream_t stream = self.op_state_.stream_;

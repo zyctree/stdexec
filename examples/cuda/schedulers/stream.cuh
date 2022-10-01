@@ -84,7 +84,7 @@ namespace example::cuda::stream {
       using completion_signatures =
         std::execution::completion_signatures<
           std::execution::set_value_t(),
-          std::execution::set_error_t(cudaStream_t)>;
+          std::execution::set_error_t(cudaError_t)>;
 
       template <class R>
         friend auto tag_invoke(std::execution::connect_t, sender_t, R&& rec)

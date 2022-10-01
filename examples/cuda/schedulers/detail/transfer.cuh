@@ -24,21 +24,6 @@ namespace example::cuda::stream {
 
 namespace transfer {
 
-  template <std::size_t I, class T>
-    void fetch(cudaStream_t stream, T&) {
-      THROW_ON_CUDA_ERROR(cudaStreamSynchronize(stream));
-    }
-
-  template <std::size_t I, class T, class Head, class... As>
-    void fetch(cudaStream_t stream, T& tpl, Head&& head, As&&... as) {
-      THROW_ON_CUDA_ERROR(cudaMemcpyAsync(&std::get<I>(tpl),
-                                          &head,
-                                          sizeof(std::decay_t<Head>),
-                                          cudaMemcpyDeviceToHost,
-                                          stream));
-      fetch<I + 1>(stream, tpl, (As&&)as...);
-    }
-
   template <class ReceiverId>
   struct sink_receiver_t : receiver_base_t {
     using Receiver = std::__t<ReceiverId>;
@@ -67,19 +52,10 @@ namespace transfer {
                 class... As _NVCXX_CAPTURE_PACK(As)>
       friend void tag_invoke(Tag tag, bypass_receiver_t&& self, As&&... as) noexcept {
         auto stream = self.operation_state_.stream_;
+        THROW_ON_CUDA_ERROR(cudaStreamSynchronize(stream));
 
         _NVCXX_EXPAND_PACK(As, as,
-          if constexpr (gpu_stream_sender<Sender>) {
-            std::tuple<std::decay_t<As>...> h_as;
-            fetch<0>(stream, h_as, (As&&)as...);
-
-            std::apply([&](auto&&... tas) {
-              tag(std::move(self.operation_state_.receiver_.receiver_), tas...);
-            }, h_as);
-          } else {
-            THROW_ON_CUDA_ERROR(cudaStreamSynchronize(stream));
-            tag(std::move(self.operation_state_.receiver_.receiver_), (As&&)as...);
-          }
+          tag(std::move(self.operation_state_.receiver_.receiver_), (As&&)as...);
         );
       }
 
