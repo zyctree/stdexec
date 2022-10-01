@@ -33,48 +33,47 @@ template <class Fun, class... As>
 template <class Fun, class ResultT, class... As>
   __launch_bounds__(1)
   __global__ void kernel_with_result(Fun fn, ResultT* result, As... as) {
-    *result = fn((As&&)as...);
+    new (result) ResultT(fn((As&&)as...));
   }
 
-template <class ReceiverId, class Fun>
+template <std::size_t MemoryAllocationSize, class ReceiverId, class Fun>
   class receiver_t : receiver_base_t {
     using Receiver = std::__t<ReceiverId>;
 
     Fun f_;
     operation_state_base_t<ReceiverId> &op_state_;
 
-   public:
+  public:
+    constexpr static std::size_t memory_allocation_size = MemoryAllocationSize;
 
     template <class... As _NVCXX_CAPTURE_PACK(As)>
-    friend void tag_invoke(std::execution::set_value_t, receiver_t&& self, As&&... as)
-      noexcept requires std::__callable<Fun, As...> {
+      friend void tag_invoke(std::execution::set_value_t, receiver_t&& self, As&&... as)
+        noexcept requires std::__callable<Fun, As...> {
 
-      _NVCXX_EXPAND_PACK(As, as,
-        using result_t = std::decay_t<std::invoke_result_t<Fun, As...>>;
+        _NVCXX_EXPAND_PACK(As, as,
+          using result_t = std::decay_t<std::invoke_result_t<Fun, As...>>;
 
-        cudaStream_t stream = self.op_state_.stream_;
+          cudaStream_t stream = self.op_state_.stream_;
 
-        if constexpr (std::is_same_v<void, result_t>) {
-          kernel<std::decay_t<Fun>, As...><<<1, 1, 0, stream>>>(self.f_, (As&&)as...);
-          self.op_state_.propagate_completion_signal(std::execution::set_value);
-        } else {
-          result_t *d_result{};
-          THROW_ON_CUDA_ERROR(cudaMallocAsync(&d_result, sizeof(result_t), stream));
-          kernel_with_result<std::decay_t<Fun>, result_t, As...><<<1, 1, 0, stream>>>(self.f_, d_result, (As&&)as...);
-          self.op_state_.propagate_completion_signal(std::execution::set_value, *d_result);
-          THROW_ON_CUDA_ERROR(cudaFreeAsync(d_result, stream));
-        }
-      );
-    }
+          if constexpr (std::is_same_v<void, result_t>) {
+            kernel<std::decay_t<Fun>, As...><<<1, 1, 0, stream>>>(self.f_, (As&&)as...);
+            self.op_state_.propagate_completion_signal(std::execution::set_value);
+          } else {
+            result_t *d_result = reinterpret_cast<result_t*>(self.op_state_.temp_storage_);
+            kernel_with_result<std::decay_t<Fun>, result_t, As...><<<1, 1, 0, stream>>>(self.f_, d_result, (As&&)as...);
+            self.op_state_.propagate_completion_signal(std::execution::set_value, *d_result);
+          }
+        );
+      }
 
     template <std::__one_of<std::execution::set_error_t,
                             std::execution::set_stopped_t> Tag,
               class... As _NVCXX_CAPTURE_PACK(As)>
-    friend void tag_invoke(Tag tag, receiver_t&& self, As&&... as) noexcept {
-      _NVCXX_EXPAND_PACK(As, as,
-        self.op_state_.propagate_completion_signal(tag, (As&&)as...);
-      );
-    }
+      friend void tag_invoke(Tag tag, receiver_t&& self, As&&... as) noexcept {
+        _NVCXX_EXPAND_PACK(As, as,
+          self.op_state_.propagate_completion_signal(tag, (As&&)as...);
+        );
+      }
 
     friend std::execution::env_of_t<Receiver> tag_invoke(std::execution::get_env_t, const receiver_t& self) {
       return std::execution::get_env(self.op_state_.receiver_);
@@ -96,8 +95,47 @@ template <class SenderId, class FunId>
     Sender sndr_;
     Fun fun_;
 
+    template <class T, int = 0>
+      struct size_of_ {
+        using __t = std::__index<sizeof(T)>;
+      };
+
+    template <int W>
+      struct size_of_<void, W> {
+        using __t = std::__index<0>;
+      };
+    
+    template <class... As>
+      struct result_size_for {
+        using __t = typename size_of_<std::__call_result_t<Fun, As...>>::__t;
+      };
+
+    template <class... Sizes>
+      struct max_in_pack {
+        static constexpr std::size_t value = std::max({std::size_t{}, std::__v<Sizes>...});
+      };
+
     template <class Receiver>
-      using receiver_t = then::receiver_t<std::__x<Receiver>, Fun>;
+        requires std::execution::sender<Sender, std::execution::env_of_t<Receiver>>
+      struct max_result_size {
+        template <class... _As>
+          using result_size_for_t = std::__t<result_size_for<_As...>>;
+
+        static constexpr std::size_t value =
+          std::__v<
+            std::execution::__gather_sigs_t<
+              std::execution::set_value_t, 
+              Sender,  
+              std::execution::env_of_t<Receiver>, 
+              std::__q<result_size_for_t>, 
+              std::__q<max_in_pack>>>;
+      };
+
+    template <class Receiver>
+      using receiver_t = 
+        then::receiver_t<
+          max_result_size<Receiver>::value, 
+          std::__x<Receiver>, Fun>;
 
     template <class Fun, class... Args>
         requires std::invocable<Fun, Args...>

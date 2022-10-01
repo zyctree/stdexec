@@ -38,7 +38,7 @@ namespace example::cuda::stream {
       }
 
     template <class _SenderId, class _SharedState>
-      class __receiver : receiver_base_t {
+      class __receiver : public receiver_base_t {
         using Sender = std::__t<_SenderId>;
 
         _SharedState &__sh_state_;

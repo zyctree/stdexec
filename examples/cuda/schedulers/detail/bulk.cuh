@@ -34,7 +34,7 @@ namespace bulk {
     }
 
   template <class ReceiverId, std::integral Shape, class Fun>
-    class receiver_t : receiver_base_t {
+    class receiver_t : public receiver_base_t {
       using Receiver = std::__t<ReceiverId>;
 
       Shape shape_;

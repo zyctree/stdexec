@@ -55,7 +55,9 @@ namespace example::cuda::stream {
   struct scheduler_t;
   struct sender_base_t {};
   struct gpu_sender_base_t : sender_base_t {};
-  struct receiver_base_t {};
+  struct receiver_base_t {
+    constexpr static std::size_t memory_allocation_size = 0;
+  };
 
   template <class... Ts>
     using decayed_tuple = tuple_t<std::decay_t<Ts>...>;
@@ -114,7 +116,7 @@ namespace example::cuda::stream {
     }
 
     template <class EnvId, class VariantId>
-      class enqueue_receiver_t : receiver_base_t {
+      class enqueue_receiver_t : public receiver_base_t {
         using Env = std::__t<EnvId>;
         using Variant = std::__t<VariantId>;
 
@@ -198,6 +200,7 @@ namespace example::cuda::stream {
 
       bool owner_{false};
       cudaStream_t stream_{0};
+      void *temp_storage_{nullptr};
       outer_receiver_t receiver_;
 
       operation_state_base_t(outer_receiver_t receiver)
@@ -228,6 +231,10 @@ namespace example::cuda::stream {
           THROW_ON_CUDA_ERROR(cudaStreamDestroy(stream_));
           stream_ = 0;
           owner_ = false;
+        }
+
+        if (temp_storage_) {
+          THROW_ON_CUDA_ERROR(cudaFree(temp_storage_));
         }
       }
     };
@@ -307,6 +314,13 @@ namespace example::cuda::stream {
 
         friend void tag_invoke(std::execution::start_t, operation_state_t& op) noexcept {
           op.stream_ = op.get_stream();
+
+          if constexpr (stream_receiver<inner_receiver_t>) {
+            if (inner_receiver_t::memory_allocation_size) {
+              THROW_ON_CUDA_ERROR(cudaMallocManaged(&op.temp_storage_, inner_receiver_t::memory_allocation_size));
+            }
+          }
+
           std::execution::start(op.inner_op_);
         }
 

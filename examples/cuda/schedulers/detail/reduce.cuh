@@ -36,7 +36,7 @@ namespace reduce_ {
       >;
 
   template <class ReceiverId, class IteratorId, class Fun>
-    class receiver_t : receiver_base_t {
+    class receiver_t : public receiver_base_t {
       using Receiver = std::__t<ReceiverId>;
       using Iterator = std::__t<IteratorId>;
       using Result = accumulator_t<Fun, typename std::iterator_traits<Iterator>::value_type>;
@@ -48,12 +48,13 @@ namespace reduce_ {
 
     public:
 
+      constexpr static std::size_t memory_allocation_size = sizeof(std::decay_t<Result>);
+
       friend void tag_invoke(std::execution::set_value_t, receiver_t&& self) noexcept {
         cudaStream_t stream = self.op_state_.stream_;
 
         using value_t = std::decay_t<Result>;
-        value_t *d_out{};
-        THROW_ON_CUDA_ERROR(cudaMallocAsync(&d_out, sizeof(value_t), stream));
+        value_t *d_out = reinterpret_cast<value_t*>(self.op_state_.temp_storage_);
 
         void *d_temp_storage{};
         std::size_t temp_storage_size{};
@@ -69,7 +70,6 @@ namespace reduce_ {
         THROW_ON_CUDA_ERROR(cudaFreeAsync(d_temp_storage, stream));
 
         self.op_state_.propagate_completion_signal(std::execution::set_value, *d_out);
-        THROW_ON_CUDA_ERROR(cudaFreeAsync(d_out, stream));
       }
 
       template <std::__one_of<std::execution::set_error_t,

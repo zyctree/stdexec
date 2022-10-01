@@ -37,7 +37,7 @@ template <class Fun, class ResultT, class... As>
   }
 
 template <class ReceiverId, class Fun>
-  class receiver_t : receiver_base_t {
+  class receiver_t : public receiver_base_t {
 
     Fun f_;
     operation_state_base_t<ReceiverId> &op_state_;

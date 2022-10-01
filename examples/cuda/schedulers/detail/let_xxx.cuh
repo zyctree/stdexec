@@ -158,7 +158,7 @@ namespace example::cuda::stream {
       struct __operation;
 
     template <class _SenderId, class _ReceiverId, class _FunId, class _Let>
-      struct __receiver : receiver_base_t {
+      struct __receiver : public receiver_base_t {
         using _Sender = std::__t<_SenderId>;
         using _Receiver = std::__t<_ReceiverId>;
         using _Fun = std::__t<_FunId>;
