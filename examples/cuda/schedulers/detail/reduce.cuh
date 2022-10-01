@@ -26,17 +26,67 @@
 
 namespace example::cuda::stream {
 
+template <typename Range>
+  auto __begin(Range&& range) {
+    return begin(range);
+  }
+
 namespace reduce_ {
-  template <class ReceiverId, class Fun>
+  struct range_value_ {
+    template <class RT, class... Range>
+    auto operator()(RT&& range, Range...) {
+      return *begin(range);
+    }
+  };
+
+  template <class... Range>
+    using range_value_t =
+      ::cuda::std::invoke_result_t<range_value_, Range...>;
+
+
+  template <class SenderId, class ReceiverId, class Fun>
     class receiver_t : public receiver_base_t {
+      using Sender = std::__t<SenderId>;
       using Receiver = std::__t<ReceiverId>;
+
+      template <class... Range>
+        struct result_size_for {
+          using __t = std::__index<
+            sizeof(
+              ::cuda::std::decay_t<
+                ::cuda::std::invoke_result_t<
+                  Fun, 
+                  range_value_t<Range...>, 
+                  range_value_t<Range...>
+                >
+              >)>;
+        };
+
+      template <class... Sizes>
+        struct max_in_pack {
+          static constexpr std::size_t value = std::max({std::size_t{}, std::__v<Sizes>...});
+        };
+
+      struct max_result_size {
+        template <class... _As>
+          using result_size_for_t = std::__t<result_size_for<_As...>>;
+
+        static constexpr std::size_t value =
+          std::__v<
+            std::execution::__gather_sigs_t<
+              std::execution::set_value_t, 
+              Sender,  
+              std::execution::env_of_t<Receiver>, 
+              std::__q<result_size_for_t>, 
+              std::__q<max_in_pack>>>;
+      };
 
       Fun f_;
       operation_state_base_t<ReceiverId> &op_state_;
 
     public:
 
-      constexpr static std::size_t memory_allocation_size = 1024; // TODO Compute
+      constexpr static std::size_t memory_allocation_size = max_result_size::value;
 
       template <class Range>
       friend void tag_invoke(std::execution::set_value_t, receiver_t&& self, Range&& range) noexcept {
@@ -91,11 +141,6 @@ namespace reduce_ {
     };
 }
 
-template <typename Range>
-auto __begin(Range&& range) {
-  return begin(range);
-}
-
 template <class SenderId, class FunId>
   struct reduce_sender_t : gpu_sender_base_t {
     using Sender = std::__t<SenderId>;
@@ -105,7 +150,10 @@ template <class SenderId, class FunId>
     Fun fun_;
 
     template <class Receiver>
-      using receiver_t = reduce_::receiver_t<std::__x<Receiver>, Fun>;
+      using receiver_t = reduce_::receiver_t<
+          SenderId, 
+          std::__x<Receiver>, 
+          Fun>;
 
     template <class... Range>
         requires (sizeof...(Range) == 1)
