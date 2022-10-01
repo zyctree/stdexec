@@ -20,6 +20,7 @@
 
 #include "common.cuh"
 #include "queue.cuh"
+#include "schedulers/detail/throw_on_cuda_error.cuh"
 
 namespace example::cuda::stream {
 
@@ -45,6 +46,12 @@ template <class Env, class... Senders>
   struct traits {
     using __t = std::execution::dependent_completion_signatures<Env>;
   };
+
+template <class TupleT, class... As>
+__launch_bounds__(1)
+__global__ void copy_kernel(TupleT* tpl, As&&... as) {
+  *tpl = decayed_tuple<As...>((As&&)as...);
+}
 
 template <class Env, class... Senders>
     requires ((std::__v<std::execution::__count_of<std::execution::set_value_t, Senders, Env>> <= 1) &&...)
@@ -136,7 +143,9 @@ template <class... SenderIds>
               // We only need to bother recording the completion values
               // if we're not already in the "error" or "stopped" state.
               if (op_state_->state_ == when_all::started) {
-                op_state_->template store_values<Index>((Values&&)vals...);
+                cudaStream_t stream = std::get<Index>(op_state_->child_states_).stream_;
+                when_all::copy_kernel<<<1, 1, 0, stream>>>(&get<Index>(*op_state_->values_), (Values&&)vals...);
+                // op_state_->template store_values<Index>((Values&&)vals...);
               }
             }
             op_state_->arrive();
@@ -208,7 +217,7 @@ template <class... SenderIds>
             using SenderId = example::cuda::detail::nth_type<Index, SenderIds...>;
             cudaStream_t stream = std::get<Index>(child_states_).stream_;
             detail::h2d::propagate<true /* async */, SenderId>(stream, [&](auto&&... args) {
-              std::get<Index>(this->values_).emplace((As&&)args...);
+              get<Index>(*this->values_) = decayed_tuple<As...>((As&&)args...);
             }, (As&&)as...);
           }
 
@@ -224,7 +233,7 @@ template <class... SenderIds>
           case when_all::started:
             if constexpr (sends_values<Traits>::value) {
               // All child operations completed successfully:
-              std::apply(
+              apply(
                 [this](auto&... opt_vals) -> void {
                   std::apply(
                     [this](auto&... all_vals) -> void {
@@ -237,14 +246,14 @@ template <class... SenderIds>
                       }
                     },
                     std::tuple_cat(
-                      std::apply(
+                      apply(
                         [](auto&... vals) { return std::tie(vals...); },
-                        *opt_vals
+                        opt_vals
                       )...
                     )
                   );
                 },
-                values_
+                *values_
               );
             }
             break;
@@ -270,11 +279,17 @@ template <class... SenderIds>
                       receiver_t<CvrefReceiverId, Is>{{}, {}, this});
                 }}...
               }
-            , recvr_((Receiver&&) rcvr)
-          {}
+            , recvr_((Receiver&&) rcvr) {
+            THROW_ON_CUDA_ERROR(cudaMallocManaged(&values_, sizeof(child_values_tuple_t)));
+          }
         operation_t(WhenAll&& when_all, Receiver rcvr)
           : operation_t((WhenAll&&) when_all, (Receiver&&) rcvr, Indices{})
         {}
+
+        ~operation_t() {
+          THROW_ON_CUDA_ERROR(cudaFree(values_));
+        }
+
         _P2300_IMMOVABLE(operation_t);
 
         friend void tag_invoke(std::execution::start_t, operation_t& self) noexcept {
@@ -298,11 +313,11 @@ template <class... SenderIds>
           std::__if<
             sends_values<Traits>,
             std::__minvoke<
-              std::__q<std::tuple>,
+              std::__q<tuple_t>,
               std::execution::__value_types_of_t<
                 std::__t<SenderIds>,
                 when_all::env_t<Env>,
-                std::__mcompose<std::__q1<std::optional>, std::__q<std::execution::__decayed_tuple>>,
+                std::__q<decayed_tuple>,
                 std::__single_or<void>>...>,
             std::__>;
 
@@ -312,7 +327,7 @@ template <class... SenderIds>
         // Could be non-atomic here and atomic_ref everywhere except __completion_fn
         std::atomic<when_all::state_t> state_{when_all::started};
         std::execution::error_types_of_t<when_all_sender_t, when_all::env_t<Env>, std::execution::__variant> errors_{};
-        child_values_tuple_t values_{};
+        child_values_tuple_t* values_{};
         std::in_place_stop_source stop_source_{};
         std::optional<typename std::execution::stop_token_of_t<std::execution::env_of_t<Receiver>&>::template
             callback_type<when_all::on_stop_requested>> on_stop_{};

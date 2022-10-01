@@ -45,11 +45,6 @@ namespace example::cuda {
         }
       };
 
-    template <std::size_t I, class Head, class... Tail>
-      Head &get(tuple_impl_t<I, Head, Tail...> &t) {
-        return t.template tuple_impl_t<I, Head, Tail...>::value_;
-      }
-
     template <class F, class T, std::size_t... Is>
       decltype(auto) apply_impl(F&& f, T&& t, std::index_sequence<Is...>) {
         return ((F&&)f)(get<Is>(t)...);
@@ -83,6 +78,11 @@ namespace example::cuda {
     decltype(auto) apply(F &&f, T &&tpl) {
       return detail::apply_impl(
           (F&&)f, (T&&)tpl, std::make_index_sequence<std::decay_t<T>::size>{});
+    }
+
+  template <std::size_t I, class Head, class... Tail>
+    Head &get(detail::tuple_impl_t<I, Head, Tail...> &t) {
+      return t.template tuple_impl_t<I, Head, Tail...>::value_;
     }
 }
 
