@@ -144,8 +144,14 @@ template <class... SenderIds>
               // if we're not already in the "error" or "stopped" state.
               if (op_state_->state_ == when_all::started) {
                 cudaStream_t stream = std::get<Index>(op_state_->child_states_).stream_;
-                when_all::copy_kernel<<<1, 1, 0, stream>>>(&get<Index>(*op_state_->values_), (Values&&)vals...);
-                // op_state_->template store_values<Index>((Values&&)vals...);
+                if constexpr (sizeof...(Values)) {
+                  when_all::copy_kernel<<<1, 1, 0, stream>>>(&get<Index>(*op_state_->values_), (Values&&)vals...);
+                  // op_state_->template store_values<Index>((Values&&)vals...);
+                }
+
+                if constexpr (stream_receiver<Receiver>) {
+                  THROW_ON_CUDA_ERROR(cudaEventRecord(op_state_->events_[Index], stream));
+                }
               }
             }
             op_state_->arrive();
@@ -175,12 +181,21 @@ template <class... SenderIds>
       };
 
     template <class CvrefReceiverId>
-      struct operation_t {
+      struct operation_t : detail::op_state_base_t {
         using WhenAll = std::__member_t<CvrefReceiverId, when_all_sender_t>;
         using Receiver = std::__t<std::decay_t<CvrefReceiverId>>;
         using Env = std::execution::env_of_t<Receiver>;
         using CvrefEnv = std::__member_t<CvrefReceiverId, Env>;
         using Traits = completion_sigs<CvrefEnv>;
+
+        cudaStream_t stream_{0};
+
+        cudaStream_t get_stream() {
+          if (!stream_) {
+            THROW_ON_CUDA_ERROR(cudaStreamCreate(&stream_));
+          }
+          return stream_;
+        }
 
         template <class Sender, std::size_t Index>
           using child_op_state =
@@ -206,6 +221,7 @@ template <class... SenderIds>
         template <class OpT>
         static void sync(OpT& op) noexcept {
           if constexpr (std::is_base_of_v<detail::op_state_base_t, OpT>) {
+            // TODO Unknown sender
             if (op.stream_) {
               THROW_ON_CUDA_ERROR(cudaStreamSynchronize(op.stream_));
             }
@@ -226,7 +242,13 @@ template <class... SenderIds>
           on_stop_.reset();
 
           // Synchronize streams
-          std::apply([](auto&... ops) { (sync(ops), ...); }, child_states_);
+          if constexpr (stream_receiver<Receiver>) {
+            for (int i = 0; i < sizeof...(SenderIds); i++) {
+              THROW_ON_CUDA_ERROR(cudaStreamWaitEvent(stream_, events_[i]));
+            }
+          } else {
+            std::apply([this](auto&... ops) { (sync(ops), ...); }, child_states_);
+          }
 
           // All child operations have completed and arrived at the barrier.
           switch(state_.load(std::memory_order_relaxed)) {
@@ -284,15 +306,29 @@ template <class... SenderIds>
           }
         operation_t(WhenAll&& when_all, Receiver rcvr)
           : operation_t((WhenAll&&) when_all, (Receiver&&) rcvr, Indices{})
-        {}
+        {
+          for (int i = 0; i < sizeof...(SenderIds); i++) {
+            THROW_ON_CUDA_ERROR(cudaEventCreate(&events_[i]));
+          }
+        }
 
         ~operation_t() {
           THROW_ON_CUDA_ERROR(cudaFree(values_));
+
+          if (stream_) {
+            THROW_ON_CUDA_ERROR(cudaStreamDestroy(stream_));
+          }
+
+          for (int i = 0; i < sizeof...(SenderIds); i++) {
+            THROW_ON_CUDA_ERROR(cudaEventDestroy(events_[i]));
+          }
         }
 
         _P2300_IMMOVABLE(operation_t);
 
         friend void tag_invoke(std::execution::start_t, operation_t& self) noexcept {
+          (void)self.get_stream();
+
           // register stop callback:
           self.on_stop_.emplace(
               std::execution::get_stop_token(std::execution::get_env(self.recvr_)),
@@ -324,6 +360,7 @@ template <class... SenderIds>
         child_op_states_tuple_t child_states_;
         Receiver recvr_;
         std::atomic<std::size_t> count_{sizeof...(SenderIds)};
+        std::array<cudaEvent_t, sizeof...(SenderIds)> events_;
         // Could be non-atomic here and atomic_ref everywhere except __completion_fn
         std::atomic<when_all::state_t> state_{when_all::started};
         std::execution::error_types_of_t<when_all_sender_t, when_all::env_t<Env>, std::execution::__variant> errors_{};
