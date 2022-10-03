@@ -149,7 +149,6 @@ template <bool WithCompletionScheduler, class Scheduler, class... SenderIds>
                 cudaStream_t stream = std::get<Index>(op_state_->child_states_).stream_;
                 if constexpr (sizeof...(Values)) {
                   when_all::copy_kernel<<<1, 1, 0, stream>>>(&get<Index>(*op_state_->values_), (Values&&)vals...);
-                  // op_state_->template store_values<Index>((Values&&)vals...);
                 }
 
                 if constexpr (stream_receiver<Receiver>) {
@@ -230,15 +229,6 @@ template <bool WithCompletionScheduler, class Scheduler, class... SenderIds>
             }
           }
         }
-
-        template <std::size_t Index, class... As>
-          void store_values(As&&... as) noexcept {
-            using SenderId = example::cuda::detail::nth_type<Index, SenderIds...>;
-            cudaStream_t stream = std::get<Index>(child_states_).stream_;
-            detail::h2d::propagate<true /* async */, SenderId>(stream, [&](auto&&... args) {
-              get<Index>(*this->values_) = decayed_tuple<As...>((As&&)args...);
-            }, (As&&)as...);
-          }
 
         void complete() noexcept {
           // Stop callback is no longer needed. Destroy it.
