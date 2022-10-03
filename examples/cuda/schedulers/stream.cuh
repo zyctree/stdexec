@@ -46,8 +46,11 @@ namespace example::cuda::stream {
   template <std::execution::sender Sender, class Fun>
     using then_sender_th = then_sender_t<std::__x<std::remove_cvref_t<Sender>>, std::__x<std::remove_cvref_t<Fun>>>;
 
-  template <std::execution::sender... Senders>
-    using when_all_sender_th = when_all_sender_t<std::__x<std::decay_t<Senders>>...>;
+  template <class Scheduler, std::execution::sender... Senders>
+    using when_all_sender_th = when_all_sender_t<false, Scheduler, std::__x<std::decay_t<Senders>>...>;
+
+  template <class Scheduler, std::execution::sender... Senders>
+    using transfer_when_all_sender_th = when_all_sender_t<true, Scheduler, std::__x<std::decay_t<Senders>>...>;
 
   template <std::execution::sender Sender, class Fun>
     using upon_error_sender_th = upon_error_sender_t<std::__x<std::remove_cvref_t<Sender>>, std::__x<std::remove_cvref_t<Fun>>>;
@@ -148,15 +151,16 @@ namespace example::cuda::stream {
     template <std::execution::sender... Senders>
     friend auto
     tag_invoke(std::execution::transfer_when_all_t, const scheduler_t& sch, Senders&&... sndrs) noexcept {
-      return std::execution::transfer(when_all_sender_th<Senders...>{(Senders&&)sndrs...}, sch);
+      return transfer_when_all_sender_th<scheduler_t, Senders...>(sch.hub_, (Senders&&)sndrs...);
     }
 
     template <std::execution::sender... Senders>
     friend auto
     tag_invoke(std::execution::transfer_when_all_with_variant_t, const scheduler_t& sch, Senders&&... sndrs) noexcept {
-      return std::execution::transfer(
-          when_all_sender_th<std::tag_invoke_result_t<std::execution::__into_variant_t, Senders>...>{
-            std::execution::into_variant((Senders&&)sndrs)...}, sch);
+      return 
+        transfer_when_all_sender_th<scheduler_t, std::tag_invoke_result_t<std::execution::__into_variant_t, Senders>...>(
+            sch.hub_, 
+            std::execution::into_variant((Senders&&)sndrs)...);
     }
 
     template <std::execution::sender S, std::execution::scheduler Sch>
@@ -189,8 +193,8 @@ namespace example::cuda::stream {
 
     bool operator==(const scheduler_t&) const noexcept = default;
 
-    scheduler_t(detail::queue::task_hub_t* hub)
-      : hub_(hub) {
+    scheduler_t(const detail::queue::task_hub_t* hub)
+      : hub_(const_cast<detail::queue::task_hub_t*>(hub)) {
     }
 
   // private: TODO
@@ -211,15 +215,16 @@ namespace example::cuda::stream {
   }
 
   template <stream_completing_sender... Senders>
-  when_all_sender_th<Senders...>
+  when_all_sender_th<scheduler_t, Senders...>
   tag_invoke(std::execution::when_all_t, Senders&&... sndrs) noexcept {
-    return when_all_sender_th<Senders...>{(Senders&&)sndrs...};
+    return when_all_sender_th<scheduler_t, Senders...>{nullptr, (Senders&&)sndrs...};
   }
 
   template <stream_completing_sender... Senders>
-  when_all_sender_th<std::tag_invoke_result_t<std::execution::__into_variant_t, Senders>...>
+  when_all_sender_th<scheduler_t, std::tag_invoke_result_t<std::execution::__into_variant_t, Senders>...>
   tag_invoke(std::execution::when_all_with_variant_t, Senders&&... sndrs) noexcept {
-    return when_all_sender_th<std::tag_invoke_result_t<std::execution::__into_variant_t, Senders>...>{
+    return when_all_sender_th<scheduler_t, std::tag_invoke_result_t<std::execution::__into_variant_t, Senders>...>{
+      nullptr, 
       std::execution::into_variant((Senders&&)sndrs)...
     };
   }

@@ -83,14 +83,17 @@ template <class Env, class... Senders>
   };
 }
 
-template <class... SenderIds>
-  struct when_all_sender_t {
+template <bool WithCompletionScheduler, class Scheduler, class... SenderIds>
+  struct when_all_sender_t : sender_base_t {
     template <class... Sndrs>
-      explicit when_all_sender_t(Sndrs&&... __sndrs)
-        : sndrs_((Sndrs&&) __sndrs...)
+      explicit when_all_sender_t(detail::queue::task_hub_t* hub, Sndrs&&... __sndrs)
+        : hub_(hub)
+        , sndrs_((Sndrs&&) __sndrs...)
       {}
 
    private:
+    const detail::queue::task_hub_t* hub_{};
+
     template <class CvrefEnv>
       using completion_sigs =
         std::__t<when_all::traits<
@@ -259,6 +262,10 @@ template <class... SenderIds>
                 [this](auto&... opt_vals) -> void {
                   std::apply(
                     [this](auto&... all_vals) -> void {
+                      if constexpr (sizeof...(all_vals)) {
+                        // TOOD Remove
+                        THROW_ON_CUDA_ERROR(cudaStreamSynchronize(stream_));
+                      }
                       try {
                       std::execution::set_value(
                             (Receiver&&) recvr_, std::move(all_vals)...);
@@ -379,6 +386,12 @@ template <class... SenderIds>
     template <std::__decays_to<when_all_sender_t> Self, class Env>
       friend auto tag_invoke(std::execution::get_completion_signatures_t, Self&&, Env)
         -> completion_sigs<std::__member_t<Self, Env>>;
+
+    template <std::__one_of<std::execution::set_value_t, std::execution::set_stopped_t> _Tag>
+      requires WithCompletionScheduler
+    friend Scheduler tag_invoke(std::execution::get_completion_scheduler_t<_Tag>, const when_all_sender_t& __self) noexcept {
+      return Scheduler(__self.hub_);
+    }
 
     std::tuple<std::__t<SenderIds>...> sndrs_;
   };
