@@ -252,13 +252,9 @@ template <bool WithCompletionScheduler, class Scheduler, class... SenderIds>
                 [this](auto&... opt_vals) -> void {
                   std::apply(
                     [this](auto&... all_vals) -> void {
-                      if constexpr (sizeof...(all_vals)) {
-                        // TOOD Remove
-                        THROW_ON_CUDA_ERROR(cudaStreamSynchronize(stream_));
-                      }
                       try {
                       std::execution::set_value(
-                            (Receiver&&) recvr_, std::move(all_vals)...);
+                            (Receiver&&) recvr_, all_vals...);
                       } catch(...) {
                       std::execution::set_error(
                             (Receiver&&) recvr_, std::current_exception());
