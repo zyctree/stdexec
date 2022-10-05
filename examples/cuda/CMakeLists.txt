@@ -33,7 +33,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "NVHPC")
       add_executable(test.CUDA ${TEST_SOURCES})
 
       target_include_directories(test.CUDA PRIVATE test)
-      target_link_libraries(test.CUDA CUDASchedulers Catch2::Catch2)
+      target_link_libraries(test.CUDA CUDASchedulers Catch2::Catch2 range-v3::range-v3)
       catch_discover_tests(test.CUDA)
 
       # Examples
@@ -48,7 +48,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "NVHPC")
           get_filename_component(example_name "${example_prefix}" NAME_WLE)
 
           add_executable(${example_name} ${example})
-          target_link_libraries(${example_name} PRIVATE CUDASchedulers)
+          target_link_libraries(${example_name} PRIVATE CUDASchedulers range-v3::range-v3)
 
           get_filename_component(PARENT_DIR ../ ABSOLUTE)
           target_include_directories(${example_name} PRIVATE ${PARENT_DIR})

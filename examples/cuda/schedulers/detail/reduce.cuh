@@ -15,52 +15,46 @@
  */
 #pragma once
 
-#include <execution.hpp>
 #include <type_traits>
 
 #include <cuda/std/type_traits>
 
+#include <range/v3/range/concepts.hpp>
+#include <range/v3/range/access.hpp>
+#include <range/v3/range/primitives.hpp>
+#include <range/v3/range/traits.hpp>
+
 #include <cub/device/device_reduce.cuh>
+
+#include <execution.hpp>
 
 #include "common.cuh"
 
 namespace example::cuda::stream {
 
-template <typename Range>
-  auto __begin(Range&& range) {
-    return begin(range);
-  }
-
 namespace reduce_ {
-  struct range_value_ {
-    template <class RT, class... Range>
-    auto operator()(RT&& range, Range...) {
-      return *begin(range);
-    }
-  };
-
-  template <class... Range>
-    using range_value_t =
-      ::cuda::std::invoke_result_t<range_value_, Range...>;
-
+  template <class Fun, ranges::range Range, class... Tail>
+      requires (sizeof...(Tail) == 0)
+    using reduce_result_t = ::cuda::std::decay_t<
+      ::cuda::std::invoke_result_t<Fun,
+                                   ranges::range_value_t<Range>,
+                                   ranges::range_value_t<Range>>
+    >;
 
   template <class SenderId, class ReceiverId, class Fun>
     class receiver_t : public receiver_base_t {
       using Sender = std::__t<SenderId>;
       using Receiver = std::__t<ReceiverId>;
 
-      template <class... Range>
+      template <ranges::range... Range>
+          requires (sizeof...(Range) == 1)
         struct result_size_for {
-          using __t = std::__index<
-            sizeof(
-              ::cuda::std::decay_t<
-                ::cuda::std::invoke_result_t<
-                  Fun, 
-                  range_value_t<Range...>, 
-                  range_value_t<Range...>
-                >
-              >)>;
+          using __t = std::__index<sizeof(reduce_result_t<Fun, Range...>)>;
         };
+
+      template <ranges::range... Range>
+          requires (sizeof...(Range) == 1)
+        using result_size_for_t = std::__t<result_size_for<Range...>>;
 
       template <class... Sizes>
         struct max_in_pack {
@@ -68,16 +62,13 @@ namespace reduce_ {
         };
 
       struct max_result_size {
-        template <class... _As>
-          using result_size_for_t = std::__t<result_size_for<_As...>>;
-
         static constexpr std::size_t value =
           std::__v<
             std::execution::__gather_sigs_t<
-              std::execution::set_value_t, 
-              Sender,  
-              std::execution::env_of_t<Receiver>, 
-              std::__q<result_size_for_t>, 
+              std::execution::set_value_t,
+              Sender,
+              std::execution::env_of_t<Receiver>,
+              std::__q<result_size_for_t>,
               std::__q<max_in_pack>>>;
       };
 
@@ -88,25 +79,20 @@ namespace reduce_ {
 
       constexpr static std::size_t memory_allocation_size = max_result_size::value;
 
-      template <class Range>
-      friend void tag_invoke(std::execution::set_value_t, receiver_t&& self, Range&& range) noexcept {
+      template <ranges::range Range>
+      friend void tag_invoke(std::execution::set_value_t, receiver_t&& self, Range&& rng) noexcept {
         cudaStream_t stream = self.op_state_.stream_;
 
-        using Result = ::cuda::std::decay_t<
-          ::cuda::std::invoke_result_t<Fun, decltype(*begin(std::declval<Range>())),
-                                            decltype(*begin(std::declval<Range>()))>
-        >;
-
-        using value_t = Result;
+        using value_t = reduce_result_t<Fun, Range>;
         value_t *d_out = reinterpret_cast<value_t*>(self.op_state_.temp_storage_);
 
         void *d_temp_storage{};
         std::size_t temp_storage_size{};
 
-        auto first = begin(range);
-        auto last = end(range);
+        auto first = ranges::begin(rng);
+        auto last = ranges::end(rng);
 
-        std::size_t num_items = std::distance(first, last);
+        std::size_t num_items = ranges::size(rng);
 
         THROW_ON_CUDA_ERROR(cub::DeviceReduce::Reduce(d_temp_storage, temp_storage_size, first,
                                                       d_out, num_items, self.f_, value_t{},
@@ -151,18 +137,16 @@ template <class SenderId, class FunId>
 
     template <class Receiver>
       using receiver_t = reduce_::receiver_t<
-          SenderId, 
-          std::__x<Receiver>, 
+          SenderId,
+          std::__x<Receiver>,
           Fun>;
 
-    template <class... Range>
+    template <ranges::range... Range>
         requires (sizeof...(Range) == 1)
       using set_value_t =
         std::execution::completion_signatures<std::execution::set_value_t(
           std::add_lvalue_reference_t<
-            ::cuda::std::decay_t<
-              ::cuda::std::invoke_result_t<Fun, decltype(*__begin(std::declval<Range>())), decltype(*__begin(std::declval<Range>()))>
-            >
+            reduce_::reduce_result_t<Fun, Range>
           >...
         )>;
 
