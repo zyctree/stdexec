@@ -33,28 +33,39 @@
 namespace example::cuda::stream {
 
 namespace reduce_ {
-  template <class Fun, ranges::range Range, class... Tail>
-      requires (sizeof...(Tail) == 0)
-    using reduce_result_t = ::cuda::std::decay_t<
-      ::cuda::std::invoke_result_t<Fun,
-                                   ranges::range_value_t<Range>,
-                                   ranges::range_value_t<Range>>
-    >;
+  template <class... As>
+    struct reduce_result_;
 
-  template <class SenderId, class ReceiverId, class Fun>
+  template <ranges::range Range, class Fun, class... Tail>
+      requires (sizeof...(Tail) == 0)
+    struct reduce_result_<Range, Fun, Tail...> {
+      using __t = ::cuda::std::decay_t<
+        ::cuda::std::invoke_result_t<Fun,
+                                     ranges::range_value_t<Range>,
+                                     ranges::range_value_t<Range>>
+      >;
+    };
+
+  template <ranges::range Range, class... Tail>
+      requires (sizeof...(Tail) == 0)
+    struct reduce_result_<Range, Tail...> {
+      using __t = ::cuda::std::decay_t<
+        ::cuda::std::invoke_result_t<cub::Sum,
+                                     ranges::range_value_t<Range>,
+                                     ranges::range_value_t<Range>>
+      >;
+    };
+
+  template <class... As>
+    using reduce_result_t = std::__t<reduce_result_<As...>>;
+
+  template <class SenderId, class ReceiverId>
     class receiver_t : public receiver_base_t {
       using Sender = std::__t<SenderId>;
       using Receiver = std::__t<ReceiverId>;
 
-      template <ranges::range... Range>
-          requires (sizeof...(Range) == 1)
-        struct result_size_for {
-          using __t = std::__index<sizeof(reduce_result_t<Fun, Range...>)>;
-        };
-
-      template <ranges::range... Range>
-          requires (sizeof...(Range) == 1)
-        using result_size_for_t = std::__t<result_size_for<Range...>>;
+      template <class... As>
+        using result_size_for_t = std::__index<sizeof(reduce_result_t<As...>)>;
 
       template <class... Sizes>
         struct max_in_pack {
@@ -72,18 +83,17 @@ namespace reduce_ {
               std::__q<max_in_pack>>>;
       };
 
-      Fun f_;
       operation_state_base_t<ReceiverId> &op_state_;
 
     public:
 
       constexpr static std::size_t memory_allocation_size = max_result_size::value;
 
-      template <ranges::range Range>
-      friend void tag_invoke(std::execution::set_value_t, receiver_t&& self, Range&& rng) noexcept {
+      template <ranges::range Range, class Fun = cub::Sum>
+      friend void tag_invoke(std::execution::set_value_t, receiver_t&& self, Range&& rng, Fun&& fn = {}) noexcept {
         cudaStream_t stream = self.op_state_.stream_;
 
-        using value_t = reduce_result_t<Fun, Range>;
+        using value_t = reduce_result_t<Range, Fun>;
         value_t *d_out = reinterpret_cast<value_t*>(self.op_state_.temp_storage_);
 
         void *d_temp_storage{};
@@ -95,12 +105,12 @@ namespace reduce_ {
         std::size_t num_items = ranges::size(rng);
 
         THROW_ON_CUDA_ERROR(cub::DeviceReduce::Reduce(d_temp_storage, temp_storage_size, first,
-                                                      d_out, num_items, self.f_, value_t{},
+                                                      d_out, num_items, fn, value_t{},
                                                       stream));
         THROW_ON_CUDA_ERROR(cudaMallocAsync(&d_temp_storage, temp_storage_size, stream));
 
         THROW_ON_CUDA_ERROR(cub::DeviceReduce::Reduce(d_temp_storage, temp_storage_size, first,
-                                                      d_out, num_items, self.f_, value_t{},
+                                                      d_out, num_items, fn, value_t{},
                                                       stream));
         THROW_ON_CUDA_ERROR(cudaFreeAsync(d_temp_storage, stream));
 
@@ -120,34 +130,27 @@ namespace reduce_ {
         return std::execution::get_env(self.op_state_.receiver_);
       }
 
-      receiver_t(Fun fun, operation_state_base_t<ReceiverId> &op_state)
-        : f_((Fun&&) fun)
-        , op_state_(op_state)
+      receiver_t(operation_state_base_t<ReceiverId> &op_state)
+        : op_state_(op_state)
       {}
     };
 }
 
-template <class SenderId, class FunId>
+template <class SenderId>
   struct reduce_sender_t : gpu_sender_base_t {
     using Sender = std::__t<SenderId>;
-    using Fun = std::__t<FunId>;
 
     Sender sndr_;
-    Fun fun_;
 
     template <class Receiver>
-      using receiver_t = reduce_::receiver_t<
-          SenderId,
-          std::__x<Receiver>,
-          Fun>;
+      using receiver_t = reduce_::receiver_t<SenderId, std::__x<Receiver>>;
 
-    template <ranges::range... Range>
-        requires (sizeof...(Range) == 1)
+    template <class... As>
       using set_value_t =
         std::execution::completion_signatures<std::execution::set_value_t(
           std::add_lvalue_reference_t<
-            reduce_::reduce_result_t<Fun, Range>
-          >...
+            reduce_::reduce_result_t<As...>
+          >
         )>;
 
     template <class Self, class Env>
@@ -167,7 +170,7 @@ template <class SenderId, class FunId>
           ((Self&&)self).sndr_,
           (Receiver&&)rcvr,
           [&](operation_state_base_t<std::__x<Receiver>>& stream_provider) -> receiver_t<Receiver> {
-            return receiver_t<Receiver>(self.fun_, stream_provider);
+            return receiver_t<Receiver>(stream_provider);
           });
     }
 
@@ -189,21 +192,17 @@ template <class SenderId, class FunId>
   };
 
 struct reduce_t {
-  template <class Sender, class Fun>
-    using __sender =
-      reduce_sender_t<
-        std::__x<std::remove_cvref_t<Sender>>,
-        std::__x<std::remove_cvref_t<Fun>>>;
+  template <class Sender>
+    using __sender = reduce_sender_t<std::__x<std::remove_cvref_t<Sender>>>;
 
-  template <std::execution::sender Sender, std::execution::__movable_value Fun>
-    __sender<Sender, Fun> operator()(Sender&& __sndr, Fun __fun) const {
-      return __sender<Sender, Fun>{{}, (Sender&&) __sndr, (Fun&&) __fun};
+  template <std::execution::sender Sender>
+    __sender<Sender> operator()(Sender&& __sndr) const {
+      return __sender<Sender>{{}, (Sender&&) __sndr};
     }
 
-  template <class Fun = cub::Sum>
-    std::execution::__binder_back<reduce_t, Fun> operator()(Fun __fun={}) const {
-      return {{}, {}, {(Fun&&) __fun}};
-    }
+  std::execution::__binder_back<reduce_t> operator()() const {
+    return {{}, {}};
+  }
 };
 
 inline constexpr reduce_t reduce{};
