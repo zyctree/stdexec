@@ -77,8 +77,8 @@ namespace schedule_from {
           storage_t *storage = reinterpret_cast<storage_t*>(self.operation_state_.temp_storage_);
           storage->template emplace<decayed_tuple<Tag, As...>>(Tag{}, (As&&)as...);
 
-          visit([&](auto& tpl) {
-            apply([&](auto tag, auto&&... tas) {
+          ::example::cuda::visit([&](auto& tpl) {
+            ::example::cuda::apply([&](auto tag, auto&&... tas) {
               self.operation_state_.template propagate_completion_signal(
                   tag, (std::decay_t<decltype(tas)>&)tas...);
             }, tpl);
@@ -130,7 +130,7 @@ template <class Scheduler, class SenderId>
 
     template <class Self, class Receiver>
       using receiver_t = schedule_from::receiver_t<
-        std::__x<std::__member_t<Self, Sender>>, 
+        std::__x<std::__member_t<Self, Sender>>,
         std::__x<Receiver>>;
 
     template <std::__decays_to<schedule_from_sender_t> Self, std::execution::receiver Receiver>
