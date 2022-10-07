@@ -5,11 +5,11 @@ namespace ex = std::execution;
 namespace stream = example::cuda::stream;
 
 int main() {
+  stream::context_t ctx{};
+
   std::vector<int> input(2048, 1);
 
-  stream::context_t stream_context{};
-
-  auto snd = ex::transfer_just(stream_context.get_scheduler(), input)
+  auto snd = ex::transfer_just(ctx.get_scheduler(), input)
            | stream::reduce();
 
   auto [result] = std::this_thread::sync_wait(std::move(snd)).value();
