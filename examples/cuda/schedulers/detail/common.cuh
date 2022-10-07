@@ -28,6 +28,11 @@
 
 namespace example::cuda {
 
+  struct unbound {};
+
+  template <typename T>
+    constexpr bool is_bound = !std::same_as<T, unbound>;
+
   enum class device_type {
     host,
     device
