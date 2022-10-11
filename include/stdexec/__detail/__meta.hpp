@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <cassert>
 #include <exception>
 #include <type_traits>
 #include <utility>
@@ -31,12 +32,10 @@
   } while(false)
 
 #ifndef STDEXEC_ASSERT_FN
-#define STDEXEC_ASSERT_FN stdexec::__stdexec_assert
+#define STDEXEC_ASSERT_FN assert
 #endif
 
 namespace stdexec {
-
-  inline constexpr void __stdexec_assert(bool valid) {if (!valid) {std::terminate();}}
 
   struct __ {};
 

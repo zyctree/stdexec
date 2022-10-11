@@ -120,7 +120,8 @@ namespace stdexec {
   namespace __env {
     struct __empty_env {};
     struct no_env {
-      friend void tag_invoke(auto, same_as<no_env> auto, auto&&...) = delete;
+      template <class _Tag, same_as<no_env> _Self, class... _Ts>
+        friend void tag_invoke(_Tag, _Self, _Ts&&...) = delete;
     };
 
     template <__class _Tag, class _Value>
@@ -131,11 +132,9 @@ namespace stdexec {
           using __value_t = _Value;
           [[no_unique_address]] std::unwrap_reference_t<_Value> __value_;
 
-          template <class... _Ts>
-            friend auto tag_invoke(same_as<_Tag> auto, const __t& __self, _Ts&&...)
-              #if !STDEXEC_NVHPC()
+          template <same_as<_Tag> _T, class... _Ts>
+            friend auto tag_invoke(_T, const __t& __self, _Ts&&...)
               noexcept(std::is_nothrow_copy_constructible_v<std::unwrap_reference_t<_Value>>)
-              #endif
               -> std::unwrap_reference_t<_Value> {
               return __self.__value_;
             }
@@ -147,8 +146,8 @@ namespace stdexec {
           using __tag_t = _Tag;
           using __value_t = __none_such;
 
-          template <class... _Ts>
-            friend void tag_invoke(same_as<_Tag> auto, const __t&, _Ts&&...) = delete;
+          template <same_as<_Tag> _T, class... _Ts>
+            friend void tag_invoke(_T, const __t&, _Ts&&...) = delete;
         };
       };
     template <class _With>
@@ -876,11 +875,11 @@ namespace stdexec {
 
     struct get_scheduler_t {
       template <__none_of<no_env> _Env>
-        requires nothrow_tag_invocable<get_scheduler_t, const _Env&> &&
+        requires tag_invocable<get_scheduler_t, const _Env&> &&
           scheduler<tag_invoke_result_t<get_scheduler_t, const _Env&>>
-      auto operator()(const _Env& __env) const
-        noexcept(nothrow_tag_invocable<get_scheduler_t, const _Env&>)
+      auto operator()(const _Env& __env) const noexcept
         -> tag_invoke_result_t<get_scheduler_t, const _Env&> {
+        static_assert(nothrow_tag_invocable<get_scheduler_t, const _Env&>);
         return tag_invoke(get_scheduler_t{}, __env);
       }
       auto operator()() const noexcept;
@@ -1665,10 +1664,11 @@ namespace stdexec {
           };
           _Receiver __rcvr_;
           connect_result_t<_Sender, __receiver> __op_state_;
-          __operation(_Sender&& __sndr, __decays_to<_Receiver> auto&& __rcvr)
-            : __rcvr_((decltype(__rcvr)&&) __rcvr)
-            , __op_state_(connect((_Sender&&) __sndr, __receiver{this}))
-          {}
+          template <__decays_to<_Receiver> _CvrefReceiver>
+            __operation(_Sender&& __sndr, _CvrefReceiver&& __rcvr)
+              : __rcvr_((_CvrefReceiver&&) __rcvr)
+              , __op_state_(connect((_Sender&&) __sndr, __receiver{this}))
+            {}
         };
     } // namespace __impl
 
@@ -4084,10 +4084,11 @@ namespace stdexec {
         std::optional<connect_result_t<schedule_result_t<_Scheduler>, __receiver2_t>> __state2_;
         connect_result_t<_CvrefSender, __receiver1_t> __state1_;
 
-        __operation1(_Scheduler __sched, _CvrefSender&& __sndr, __decays_to<_Receiver> auto&& __rcvr)
-          : __sched_(__sched)
-          , __rcvr_((decltype(__rcvr)&&) __rcvr)
-          , __state1_(connect((_CvrefSender&&) __sndr, __receiver1_t{this})) {}
+        template <__decays_to<_Receiver> _CvrefReceiver>
+          __operation1(_Scheduler __sched, _CvrefSender&& __sndr, _CvrefReceiver&& __rcvr)
+            : __sched_(__sched)
+            , __rcvr_((_CvrefReceiver&&) __rcvr)
+            , __state1_(connect((_CvrefSender&&) __sndr, __receiver1_t{this})) {}
         STDEXEC_IMMOVABLE(__operation1);
 
         friend void tag_invoke(start_t, __operation1& __op_state) noexcept {
@@ -4496,8 +4497,9 @@ namespace stdexec {
             __compl_sigs<_Env>;
 
        public:
-        explicit __sender(__decays_to<_Sender> auto&& __sndr)
-          : __sndr_((decltype(__sndr)) __sndr) {}
+        template <__decays_to<_Sender> _CvrefSender>
+          explicit __sender(_CvrefSender&& __sndr)
+            : __sndr_((_CvrefSender&&) __sndr) {}
       };
 
     struct into_variant_t {
