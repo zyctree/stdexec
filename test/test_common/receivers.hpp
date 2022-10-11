@@ -287,12 +287,13 @@ private:
   }
 };
 
+template <class T>
 struct expect_error_receiver_ex {
-  expect_error_receiver_ex(bool& executed)
-    : executed_(&executed)
+  expect_error_receiver_ex(T& value)
+    : value_(&value)
   {}
 private:
-  bool* executed_;
+  T* value_;
 
   template <typename... Ts>
   friend void tag_invoke(ex::set_value_t, expect_error_receiver_ex&&, Ts...) noexcept {
@@ -301,9 +302,14 @@ private:
   friend void tag_invoke(ex::set_stopped_t, expect_error_receiver_ex&&) noexcept {
     FAIL_CHECK("set_stopped called on expect_error_receiver_ex");
   }
+  template <class Err>
   friend void tag_invoke(
-      ex::set_error_t, expect_error_receiver_ex&& self, std::exception_ptr) noexcept {
-    *self.executed_ = true;
+      ex::set_error_t, expect_error_receiver_ex&&, Err) noexcept {
+    FAIL_CHECK("set_error called on expect_error_receiver_ex with the wrong error type");
+  }
+  friend void tag_invoke(
+      ex::set_error_t, expect_error_receiver_ex&& self, T value) noexcept {
+    *self.value_ = std::move(value);
   }
   friend empty_env tag_invoke(ex::get_env_t, const expect_error_receiver_ex&) noexcept {
     return {};
