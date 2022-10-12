@@ -21,6 +21,7 @@
 #include <test_common/receivers.hpp>
 #include <test_common/type_helpers.hpp>
 #include <exec/on.hpp>
+#include <exec/env.hpp>
 #include <exec/static_thread_pool.hpp>
 
 #include <chrono>
@@ -28,6 +29,11 @@
 namespace ex = std::execution;
 
 using namespace std::chrono_literals;
+
+template <ex::scheduler Sched>
+inline auto _with_scheduler(Sched sched) {
+  return exec::write(exec::with(ex::get_scheduler, std::move(sched)));
+}
 
 TEST_CASE("exec::on returns a sender", "[adaptors][exec::on]") {
   auto snd = exec::on(inline_scheduler{}, ex::just(13));
@@ -49,7 +55,7 @@ TEST_CASE("exec::on simple example", "[adaptors][exec::on]") {
 TEST_CASE("exec::on calls the receiver when the scheduler dictates", "[adaptors][exec::on]") {
   int recv_value{0};
   impulse_scheduler sched;
-  auto snd = exec::on(sched, ex::just(13)) | exec::complete_on(inline_scheduler{});
+  auto snd = exec::on(sched, ex::just(13)) | _with_scheduler(inline_scheduler{});
   auto op = ex::connect(std::move(snd), expect_value_receiver_ex{&recv_value});
   ex::start(op);
   // Up until this point, the scheduler didn't start any task; no effect expected
@@ -69,7 +75,7 @@ TEST_CASE("exec::on calls the given sender when the scheduler dictates", "[adapt
 
   int recv_value{0};
   impulse_scheduler sched;
-  auto snd = exec::on(sched, std::move(snd_base)) | exec::complete_on(inline_scheduler{});
+  auto snd = exec::on(sched, std::move(snd_base)) | _with_scheduler(inline_scheduler{});
   auto op = ex::connect(std::move(snd), expect_value_receiver_ex{&recv_value});
   ex::start(op);
   // Up until this point, the scheduler didn't start any task
@@ -182,7 +188,7 @@ TEST_CASE("exec::on transitions back to the receiver's scheduler when completing
   int recv_value{0};
   impulse_scheduler sched1;
   impulse_scheduler sched2;
-  auto snd = exec::on(sched1, std::move(snd_base)) | exec::complete_on(sched2);
+  auto snd = exec::on(sched1, std::move(snd_base)) | _with_scheduler(sched2);
   auto op = ex::connect(std::move(snd), expect_value_receiver_ex{&recv_value});
   ex::start(op);
   // Up until this point, the scheduler didn't start any task
@@ -213,7 +219,7 @@ TEST_CASE("exec::on transitions back to the receiver's scheduler when completing
   int recv_error{0};
   impulse_scheduler sched1;
   impulse_scheduler sched2;
-  auto snd = exec::on(sched1, std::move(snd_base)) | exec::complete_on(sched2);
+  auto snd = exec::on(sched1, std::move(snd_base)) | _with_scheduler(sched2);
   auto op = ex::connect(std::move(snd), expect_error_receiver_ex{recv_error});
   ex::start(op);
   // Up until this point, the scheduler didn't start any task
@@ -247,7 +253,7 @@ TEST_CASE("inner on transitions back to outer on's scheduler when completing wit
   impulse_scheduler sched3;
   auto snd =
       exec::on(sched1, exec::on(sched2, std::move(snd_base)))
-    | exec::complete_on(sched3);
+    | _with_scheduler(sched3);
   auto op = ex::connect(std::move(snd), expect_value_receiver_ex{&recv_value});
   ex::start(op);
   // Up until this point, the scheduler didn't start any task
@@ -298,7 +304,7 @@ TEST_CASE("inner on transitions back to outer on's scheduler when completing wit
   impulse_scheduler sched3;
   auto snd =
       exec::on(sched1, exec::on(sched2, std::move(snd_base)))
-    | exec::complete_on(sched3);
+    | _with_scheduler(sched3);
   auto op = ex::connect(std::move(snd), expect_error_receiver_ex{recv_error});
   ex::start(op);
   // Up until this point, the scheduler didn't start any task
@@ -349,7 +355,7 @@ TEST_CASE("exec::on(closure) transitions onto and back off of the scheduler when
   auto snd =
       ex::just()
     | exec::on(sched1, std::move(closure))
-    | exec::complete_on(sched2);
+    | _with_scheduler(sched2);
   auto op = ex::connect(std::move(snd), expect_value_receiver_ex{&recv_value});
   ex::start(op);
   // Up until this point, the scheduler didn't start any task
@@ -383,7 +389,7 @@ TEST_CASE("exec::on(closure) transitions onto and back off of the scheduler when
   auto snd =
       ex::just()
     | exec::on(sched1, std::move(closure))
-    | exec::complete_on(sched2);
+    | _with_scheduler(sched2);
   auto op = ex::connect(std::move(snd), expect_error_receiver_ex{recv_error});
   ex::start(op);
   // Up until this point, the scheduler didn't start any task
@@ -418,7 +424,7 @@ TEST_CASE("inner on(closure) transitions back to outer on's scheduler when compl
   auto snd =
       exec::on(sched1, ex::just(19))
     | exec::on(sched2, std::move(closure))
-    | exec::complete_on(sched3);
+    | _with_scheduler(sched3);
   auto op = ex::connect(std::move(snd), expect_value_receiver_ex{&recv_value});
   ex::start(op);
   // Up until this point, the scheduler didn't start any task
@@ -470,7 +476,7 @@ TEST_CASE("inner on(closure) transitions back to outer on's scheduler when compl
   auto snd =
       exec::on(sched1, ex::just(19))
     | exec::on(sched2, std::move(closure))
-    | exec::complete_on(sched3);
+    | _with_scheduler(sched3);
   auto op = ex::connect(std::move(snd), expect_error_receiver_ex{recv_error});
   ex::start(op);
   // Up until this point, the scheduler didn't start any task
