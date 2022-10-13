@@ -18,6 +18,7 @@
 #include <stdexec/execution.hpp>
 #include <stdexec/__detail/__intrusive_queue.hpp>
 #include <exec/env.hpp>
+#include <exec/inline_scheduler.hpp>
 
 namespace exec {
   /////////////////////////////////////////////////////////////////////////////
@@ -79,7 +80,7 @@ namespace exec {
         }
 
         [[noreturn]] void set_error(std::exception_ptr) noexcept {
-              std::terminate();
+          std::terminate();
         }
 
         void set_stopped() noexcept {
@@ -87,7 +88,9 @@ namespace exec {
         }
 
         auto get_env() const& {
-          return make_env(with(std::execution::get_stop_token, __get_stop_token_(__scope_)));
+          return make_env(
+            with(std::execution::get_stop_token, __get_stop_token_(__scope_)),
+            with(std::execution::get_scheduler, inline_scheduler{}));
         }
       };
 
@@ -261,7 +264,9 @@ namespace exec {
         }
 
         auto get_env() const& {
-          return make_env(with(std::execution::get_stop_token, __get_stop_token_(__scope_)));
+          return make_env(
+            with(std::execution::get_stop_token, __get_stop_token_(__scope_)),
+            with(std::execution::get_scheduler, inline_scheduler{}));
         }
       };
 
@@ -427,7 +432,9 @@ namespace exec {
                           std::execution::set_stopped(std::move(__op_->__rcvr_));
                       }
                       auto get_env() const& {
-                        return make_env(with(std::execution::get_stop_token, __get_stop_token_(__get_scope_(__op_))));
+                        return make_env(
+                          with(std::execution::get_stop_token, __get_stop_token_(__get_scope_(__op_))),
+                          with(std::execution::get_scheduler, inline_scheduler{}));
                       }
                   };
                   [[no_unique_address]] __Receiver __rcvr_;
@@ -484,14 +491,14 @@ namespace exec {
             using _Constrained = __t<_ConstrainedId>;
 
             template<class _ReceiverId>
-              struct __operation : __immovable {
+              struct __op : __immovable {
                 using __Receiver = __t<_ReceiverId>;
                 struct __receiver : private receiver_adaptor<__receiver> {
-                    __operation* __op_;
+                    __op* __op_;
                     template <class _Op>
-                      explicit __receiver(_Op* __op) noexcept
-                        : receiver_adaptor<__receiver>{}, __op_(__op) {
-                        static_assert(same_as<_Op, __operation>);
+                      explicit __receiver(_Op* __o) noexcept
+                        : receiver_adaptor<__receiver>{}, __op_(__o) {
+                        static_assert(same_as<_Op, __op>);
                       }
                 private:
                     static void __complete(async_scope* __scope) noexcept {
@@ -534,14 +541,16 @@ namespace exec {
                         __complete(__scope);
                     }
                     auto get_env() const& {
-                      return make_env(with(std::execution::get_stop_token, __get_stop_token_(__get_scope_(__op_))));
+                      return make_env(
+                        with(std::execution::get_stop_token, __get_stop_token_(__get_scope_(__op_))),
+                        with(std::execution::get_scheduler, inline_scheduler{}));
                     }
                 };
                 async_scope* __scope_;
                 [[no_unique_address]] __Receiver __rcvr_;
                 STDEXEC_IMMOVABLE_NO_UNIQUE_ADDRESS connect_result_t<_Constrained, __receiver> __op_;
                 template<class _Constrained, class _Receiver>
-                  explicit __operation(async_scope* __scope, _Constrained&& __c, _Receiver&& __r)
+                  explicit __op(async_scope* __scope, _Constrained&& __c, _Receiver&& __r)
                     : __scope_(__scope)
                     , __rcvr_((_Receiver&&)__r)
                     , __op_(connect((_Constrained&&)__c, __receiver{this})) {}
@@ -553,18 +562,26 @@ namespace exec {
                     __guard.unlock();
                     start(this->__op_);
                 }
-                friend void tag_invoke(start_t, __operation& __self) noexcept {
+                friend void tag_invoke(start_t, __op& __self) noexcept {
                   return __self.__start_impl();
                 }
             };
             async_scope* __scope_;
             [[no_unique_address]] _Constrained __c_;
         private:
+            template <class _Receiver>
+              using __operation = __op<__x<remove_cvref_t<_Receiver>>>;
+            template <class _Receiver>
+              using __receiver = typename __operation<_Receiver>::__receiver;
+            template <class _Receiver>
+              using __constrained_completions =
+                completion_signatures_of_t<_Constrained, env_of_t<__receiver<_Receiver>>>;
+
             template <__decays_to<__sender> _Self, class _Receiver>
-              requires receiver_of<_Receiver, completion_signatures_of_t<_Constrained, __empty_env>>
-              [[nodiscard]] friend __operation<__x<remove_cvref_t<_Receiver>>>
+              requires receiver_of<_Receiver, __constrained_completions<_Receiver>>
+              [[nodiscard]] friend __operation<_Receiver>
               tag_invoke(connect_t, _Self&& __self, _Receiver&& __rcvr) {
-                return __operation<__x<remove_cvref_t<_Receiver>>>{__self.__scope_, ((_Self&&) __self).__c_, (_Receiver&&)__rcvr};
+                return __operation<_Receiver>{__self.__scope_, ((_Self&&) __self).__c_, (_Receiver&&)__rcvr};
               }
             template <__decays_to<__sender> _Self, class _Env>
               friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)

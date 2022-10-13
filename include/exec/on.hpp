@@ -36,23 +36,28 @@ namespace exec {
         _Scheduler __sched_;
         _Sender __sndr_;
 
-        template <class _Self, class _OldScheduler>
-          static auto __call(_Self&& __self, _OldScheduler __old_sched) {
+        template <class _Self, class _OldSched>
+          static auto __call(_Self&& __self, _OldSched __old_sched) {
             return std::move(((_Self&&) __self).__sndr_)
               | transfer(__old_sched)
               | exec::write(exec::with(get_scheduler, __self.__sched_));
           }
 
-        auto operator()(auto __old_sched) && {
-          return __call(std::move(*this), __old_sched);
-        }
-        auto operator()(auto __old_sched) const & {
-          return __call(*this, __old_sched);
-        }
+        template <scheduler _OldSched>
+          auto operator()(_OldSched __old_sched) && {
+            return __call(std::move(*this), __old_sched);
+          }
+        template <scheduler _OldSched>
+          auto operator()(_OldSched __old_sched) const & {
+            return __call(*this, __old_sched);
+          }
       };
     template <class _Scheduler, class _Sender>
       __start_fn(_Scheduler, _Sender)
         -> __start_fn<__x<_Scheduler>, __x<_Sender>>;
+
+    template <class _Env, class _Sender>
+      struct _ENVIRONMENT_HAS_NO_SCHEDULER_FOR_THE_ON_ADAPTOR_TO_TRANSITION_BACK_TO {};
 
     template <class _SchedulerId, class _SenderId>
       struct __start_on_sender {
@@ -65,7 +70,7 @@ namespace exec {
         template <class _Self>
           static auto __call(_Self&& __self) {
             return let_value(
-              exec::read_with_default(get_scheduler, __self.__sched_)
+              stdexec::read(get_scheduler)
                 | transfer(__self.__sched_),
               __start_fn{__self.__sched_, ((_Self&&) __self).__sndr_});
           }
@@ -84,6 +89,11 @@ namespace exec {
         template <__decays_to<__start_on_sender> _Self, class _Env>
           friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env&&)
             -> completion_signatures_of_t<__inner_t<_Self>, _Env>;
+
+        template <__decays_to<__start_on_sender> _Self, __none_of<no_env> _Env>
+            requires (!__callable<get_scheduler_t, _Env>)
+          friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)
+            -> _ENVIRONMENT_HAS_NO_SCHEDULER_FOR_THE_ON_ADAPTOR_TO_TRANSITION_BACK_TO<_Env, _Sender>;
 
         // forward sender queries:
         template <tag_category<forwarding_sender_query> _Tag, class... _As _NVCXX_CAPTURE_PACK(_As)>
@@ -118,8 +128,8 @@ namespace exec {
         _Scheduler __sched_;
         _Closure __closure_;
 
-        template <class _Self, class _OldScheduler>
-          static auto __call(_Self&& __self, _OldScheduler __old_sched) {
+        template <class _Self, class _OldSched>
+          static auto __call(_Self&& __self, _OldSched __old_sched) {
             return ((_Self&&) __self).__sndr_
               | transfer(__self.__sched_)
               | exec::write(exec::with(get_scheduler, __old_sched))
@@ -128,12 +138,14 @@ namespace exec {
               | exec::write(exec::with(get_scheduler, __self.__sched_));
           }
 
-        auto operator()(auto __old_sched) && {
-          return __call(std::move(*this), __old_sched);
-        }
-        auto operator()(auto __old_sched) const & {
-          return __call(*this, __old_sched);
-        }
+        template <scheduler _OldSched>
+          auto operator()(_OldSched __old_sched) && {
+            return __call(std::move(*this), __old_sched);
+          }
+        template <scheduler _OldSched>
+          auto operator()(_OldSched __old_sched) const & {
+            return __call(*this, __old_sched);
+          }
       };
     template <class _Sender, class _Scheduler, class _Closure>
       __continue_fn(_Sender, _Scheduler, _Closure)
@@ -152,7 +164,7 @@ namespace exec {
         template <class _Self>
           static auto __call(_Self&& __self) {
             return let_value(
-              exec::read_with_default(get_scheduler, __self.__sched_),
+              stdexec::read(get_scheduler),
               __continue_fn{
                 ((_Self&&) __self).__sndr_,
                 __self.__sched_,
@@ -173,6 +185,11 @@ namespace exec {
         template <__decays_to<__continue_on_sender> _Self, class _Env>
           friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env&&)
             -> completion_signatures_of_t<__inner_t<_Self>, _Env>;
+
+        template <__decays_to<__continue_on_sender> _Self, __none_of<no_env> _Env>
+            requires (!__callable<get_scheduler_t, _Env>)
+          friend auto tag_invoke(get_completion_signatures_t, _Self&&, _Env)
+            -> _ENVIRONMENT_HAS_NO_SCHEDULER_FOR_THE_ON_ADAPTOR_TO_TRANSITION_BACK_TO<_Env, _Sender>;
 
         // forward sender queries:
         template <tag_category<forwarding_sender_query> _Tag, class... _As _NVCXX_CAPTURE_PACK(_As)>
